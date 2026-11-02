@@ -1771,7 +1771,7 @@ public class LocalLogicalPlanOptimizerTests extends AbstractLocalLogicalPlanOpti
     }
 
     public void testTimeSeriesMetadataAttributeNotReplaced() {
-        var timeSeriesAttr = new TimeSeriesMetadataAttribute(EMPTY, Set.of());
+        var timeSeriesAttr = TimeSeriesMetadataAttribute.create(EMPTY, Set.of());
         var fieldAttr = getFieldAttribute("name");
         var relation = new EsRelation(
             EMPTY,
