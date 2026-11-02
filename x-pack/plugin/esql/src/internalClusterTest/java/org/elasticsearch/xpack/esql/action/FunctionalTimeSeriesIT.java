@@ -7,6 +7,7 @@
 
 package org.elasticsearch.xpack.esql.action;
 
+import org.elasticsearch.common.Strings;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.util.CollectionUtils;
 import org.elasticsearch.plugins.Plugin;
@@ -847,7 +848,7 @@ public class FunctionalTimeSeriesIT extends AbstractEsqlIntegTestCase {
                         .put("index.number_of_replicas", 0)
                         .put("index.routing.allocation.total_shards_per_node", 1)
                 )
-                .setMapping("""
+                .setMapping(Strings.format("""
                     {
                       "properties": {
                         "@timestamp": {"type": "date"},
@@ -859,7 +860,7 @@ public class FunctionalTimeSeriesIT extends AbstractEsqlIntegTestCase {
                         "tx": {"type": "double", "time_series_metric": "gauge"}
                       }
                     }
-                    """.formatted(extraProperties))
+                    """, extraProperties))
         );
         ensureGreen(INDEX);
     }
