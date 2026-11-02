@@ -12,6 +12,7 @@ import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.core.Tuple;
 import org.elasticsearch.index.IndexMode;
 import org.elasticsearch.test.ESTestCase;
+import org.elasticsearch.test.TransportVersionUtils;
 import org.elasticsearch.xpack.esql.EsqlTestUtils;
 import org.elasticsearch.xpack.esql.TestAnalyzer;
 import org.elasticsearch.xpack.esql.VerificationException;
@@ -22,6 +23,7 @@ import org.elasticsearch.xpack.esql.analysis.InSubqueryResolver;
 import org.elasticsearch.xpack.esql.analysis.UnmappedResolution;
 import org.elasticsearch.xpack.esql.core.expression.Attribute;
 import org.elasticsearch.xpack.esql.core.expression.FieldAttribute;
+import org.elasticsearch.xpack.esql.core.expression.Literal;
 import org.elasticsearch.xpack.esql.core.querydsl.QueryDslTimestampBoundsExtractor.TimestampBounds;
 import org.elasticsearch.xpack.esql.core.type.DataType;
 import org.elasticsearch.xpack.esql.core.type.EsField;
@@ -30,6 +32,7 @@ import org.elasticsearch.xpack.esql.index.IndexProperties;
 import org.elasticsearch.xpack.esql.optimizer.rules.logical.promql.TranslatePromqlToEsqlPlan;
 import org.elasticsearch.xpack.esql.parser.ParsingException;
 import org.elasticsearch.xpack.esql.parser.promql.PromqlAstTests;
+import org.elasticsearch.xpack.esql.plan.logical.Eval;
 import org.elasticsearch.xpack.esql.plan.logical.LogicalPlan;
 import org.elasticsearch.xpack.esql.plan.logical.Row;
 import org.elasticsearch.xpack.esql.plan.logical.local.EmptyLocalSupplier;
@@ -66,14 +69,34 @@ public class PromqlVerifierTests extends ESTestCase {
         .unmappedResolution(UnmappedResolution.NULLIFY)
         .minimumTransportVersion(TransportVersion.current());
 
-    /** Without typed metadata, leaving labels out of _timeseries is rejected (keyword path unsupported). */
-    public void testNestedWithoutRequiresFeatureFlag() {
-        assumeFalse(
-            "requires functional time-series metadata to be disabled",
-            EsqlCapabilities.Cap.PROMQL_ENABLE_TIMESERIES_TYPE.isEnabled()
-        );
-        for (String expression : nestedWithoutAggregations()) {
-            tsdb.error(
+    /** Participating nodes that read keyword {@code _timeseries}: PromQL keeps the shapes and messages it had before typed metadata. */
+    private final TestAnalyzer keywordTsdb = analyzer().addIndex("test", "tsdb-mapping.json", IndexMode.TIME_SERIES)
+        .stripErrorPrefix(true)
+        .unmappedResolution(UnmappedResolution.NULLIFY)
+        .minimumTransportVersion(TransportVersionUtils.getPreviousVersion(TransportVersion.fromName("promql_functional_timeseries")));
+
+    /**
+     * Keyword metadata reads each WITHOUT view at the source and cannot derive one view from another: an outer WITHOUT keeps
+     * the inner view or regroups concrete labels, and needs typed metadata to leave more labels out of an opaque result.
+     */
+    public void testNestedWithoutWithoutTypedMetadata() {
+        for (String expression : List.of(
+            "avg without(pod)(sum without(pod)(network.bytes_in))",
+            "max without()(sum without(pod)(network.bytes_in))",
+            "max without(region)(avg by(cluster, region)(sum without(pod)(network.bytes_in)))",
+            "count without(cluster)(sum(sum without(pod)(network.bytes_in)))"
+        )) {
+            assertTrue(expression, keywordTsdb.query("PROMQL index=test step=5m result=(" + expression + ")").resolved());
+        }
+        for (String expression : List.of(
+            "sum without(cluster)(max without(pod)(network.bytes_in))",
+            "avg without(cluster, region)(sum without(pod, region)(network.bytes_in))",
+            "avg without(pod)(sum without()(network.bytes_in))",
+            "count without(cluster)(max without(region)(sum without(pod)(network.bytes_in)))",
+            "avg without(missing_outer)(sum without(missing_inner)(network.bytes_in))",
+            "avg without(cluster)(sum without(pod)(rate(network.bytes_in[5m])))"
+        )) {
+            keywordTsdb.error(
                 "PROMQL index=test step=5m result=(" + expression + ")",
                 containsString("leaving labels out of _timeseries requires typed time-series metadata")
             );
@@ -745,7 +768,8 @@ public class PromqlVerifierTests extends ESTestCase {
         assertNotNull(tsdb.query("PROMQL index=test step=5m avg(network.bytes_in > 5)"));
         assertTrue(
             tsdb.query(
-                "PROMQL index=test step=5m sum by (dst) (label_replace(sum by (host) (network.bytes_in) > 0, \"dst\", \"$1\", \"host\", \"(.+)\"))"
+                "PROMQL index=test step=5m "
+                    + "sum by (dst) (label_replace(sum by (host) (network.bytes_in) > 0, \"dst\", \"$1\", \"host\", \"(.+)\"))"
             ).resolved()
         );
     }
@@ -932,32 +956,28 @@ public class PromqlVerifierTests extends ESTestCase {
 
     public void testLabelReplaceOpaquePlacementsRejectedWithoutTypedMetadata() {
         // Without typed _timeseries, opaque rest cannot be rewritten (#157672): keyword rest would leak the pre-replace label.
-        assumeFalse(
-            "requires functional time-series metadata to be disabled",
-            EsqlCapabilities.Cap.PROMQL_ENABLE_TIMESERIES_TYPE.isEnabled()
-        );
-        tsdb.error(
+        keywordTsdb.error(
             "PROMQL index=test step=5m label_replace(network.bytes_in, \"dst\", \"$1\", \"host\", \"(.+)\")",
             containsString(
                 "[label_replace] is only supported inside a `by(...)` aggregation or over the result of one, "
                     + "but was used as a top-level expression over raw (non-aggregated) series"
             )
         );
-        tsdb.error(
+        keywordTsdb.error(
             "PROMQL index=test step=5m sum without (dst) (label_replace(network.bytes_in, \"dst\", \"$1\", \"host\", \"(.+)\"))",
             containsString("[label_replace] is only supported inside a `by(...)` aggregation, but was used with a `without(...)` grouping")
         );
-        tsdb.error(
+        keywordTsdb.error(
             "PROMQL index=test step=5m label_replace(network.bytes_in, \"dst\", \"$1\", \"host\", \"(.+)\") + network.connections",
             containsString(
                 "[label_replace] is only supported inside a `by(...)` aggregation, but was used as an operand of a binary operator"
             )
         );
-        tsdb.error(
+        keywordTsdb.error(
             "PROMQL index=test step=5m sum (label_replace(network.bytes_in, \"dst\", \"$1\", \"host\", \"(.+)\"))",
             containsString("[label_replace] is only supported inside a `by(...)` aggregation, but was used without a `by(...)` grouping")
         );
-        tsdb.error(
+        keywordTsdb.error(
             "PROMQL index=test step=5m topk(3, label_replace(network.bytes_in, \"dst\", \"$1\", \"host\", \"(.+)\"))",
             containsString(
                 "[label_replace] is only supported inside a `by(...)` aggregation or over the result of one, "
@@ -969,27 +989,44 @@ public class PromqlVerifierTests extends ESTestCase {
     public void testLabelReplaceOverNonByAggregateRejectedWithSpecificReason() {
         // The input is aggregated, but not by a `by(...)`: the message names what the relabel actually sits on instead of
         // calling it non-aggregated.
-        tsdb.error(
+        keywordTsdb.error(
             "PROMQL index=test step=5m label_replace(sum (network.bytes_in), \"dst\", \"$1\", \"host\", \"(.+)\")",
             containsString("but was used as a top-level expression over an aggregation without a `by(...)` grouping")
         );
-        tsdb.error(
+        keywordTsdb.error(
             "PROMQL index=test step=5m label_replace(sum without (host) (network.bytes_in), \"dst\", \"$1\", \"host\", \"(.+)\")",
             containsString("but was used as a top-level expression over a `without(...)` aggregation")
         );
-        tsdb.error(
+        keywordTsdb.error(
             "PROMQL index=test step=5m label_replace(topk(3, sum by (host) (network.bytes_in)), \"dst\", \"$1\", \"host\", \"(.+)\")",
             containsString("but was used as a top-level expression over [topk]")
         );
-        tsdb.error(
+        keywordTsdb.error(
             "PROMQL index=test step=5m label_replace(sum by (host) (network.bytes_in) * 2, \"dst\", \"$1\", \"host\", \"(.+)\")",
             containsString("but was used as a top-level expression over a binary operator")
         );
-        tsdb.error(
+        keywordTsdb.error(
             "PROMQL index=test step=5m "
                 + "bottomk(2, label_replace(sum by (host) (network.bytes_in) * 2, \"dst\", \"$1\", \"host\", \"(.+)\"))",
             containsString("but was used under [bottomk] over a binary operator")
         );
+    }
+
+    public void testLabelReplaceOverConcreteLabelSetsResolves() {
+        assumeTrue("requires functional time-series metadata", EsqlCapabilities.Cap.PROMQL_ENABLE_TIMESERIES_TYPE.isEnabled());
+        // Every one of these inputs carries a concrete label set, so the relabel reads its source labels as columns whatever
+        // the time-series metadata representation, as Prometheus applies label_replace to any instant vector.
+        for (String input : List.of(
+            "sum (network.bytes_in)",
+            "sum without (host) (network.bytes_in)",
+            "topk(3, sum by (host) (network.bytes_in))",
+            "sum by (host) (network.bytes_in) * 2"
+        )) {
+            String query = "PROMQL index=test step=5m label_replace(" + input + ", \"dst\", \"$1\", \"host\", \"(.+)\")";
+            assertTrue(query, tsdb.query(query).resolved());
+        }
+        String underBottomk = "bottomk(2, label_replace(sum by (host) (network.bytes_in) * 2, \"dst\", \"$1\", \"host\", \"(.+)\"))";
+        assertTrue(tsdb.query("PROMQL index=test step=5m " + underBottomk).resolved());
     }
 
     public void testLabelReplaceOpaquePlacementsResolveWithTypedMetadata() {
@@ -1086,13 +1123,34 @@ public class PromqlVerifierTests extends ESTestCase {
     public void testLabelJoinOverBinaryOperatorRejected() {
         // A binary operator's output does not materialize the relabel's source labels as readable columns, so the
         // derivation would silently see them as absent and join empty strings instead of the matched label values.
-        tsdb.error(
+        keywordTsdb.error(
             "PROMQL index=test step=5m "
                 + "label_join(sum by (host) (network.bytes_in) / sum by (host) (network.bytes_in), \"dst\", \"-\", \"host\")",
             containsString(
                 "[label_join] is only supported inside a `by(...)` aggregation or over the result of one, "
                     + "but was used as a top-level expression over a binary operator"
             )
+        );
+    }
+
+    public void testLabelJoinOverBinaryOperatorReadsMatchedLabels() {
+        assumeTrue("requires functional time-series metadata", EsqlCapabilities.Cap.PROMQL_ENABLE_TIMESERIES_TYPE.isEnabled());
+        // The binary operator's result carries the matched `host` label, so the derivation reads it as a column rather than
+        // seeing it as absent and joining empty strings.
+        LogicalPlan plan = tsdb.query(
+            "PROMQL index=test step=5m "
+                + "label_join(sum by (host) (network.bytes_in) / sum by (host) (network.bytes_in), \"dst\", \"-\", \"host\")"
+        );
+        assertTrue(plan.resolved());
+        plan.forEachDown(
+            Eval.class,
+            eval -> eval.fields()
+                .forEach(
+                    field -> assertFalse(
+                        field.toString(),
+                        field.name().equals("host") && field.child() instanceof Literal l && l.value() == null
+                    )
+                )
         );
     }
 
