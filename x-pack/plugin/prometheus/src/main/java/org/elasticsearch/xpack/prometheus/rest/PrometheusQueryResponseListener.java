@@ -29,6 +29,7 @@ import org.elasticsearch.xpack.esql.action.EsqlQueryResponse;
 import org.elasticsearch.xpack.esql.action.ResponseValueUtils;
 import org.elasticsearch.xpack.esql.core.expression.MetadataAttribute;
 import org.elasticsearch.xpack.esql.core.type.DataType;
+import org.elasticsearch.xpack.esql.core.util.TimeSeriesMetadata;
 
 import java.io.IOException;
 import java.time.Instant;
@@ -300,7 +301,10 @@ class PrometheusQueryResponseListener implements ActionListener<EsqlQueryRespons
             String timeseriesJson = "{}";
             if (timeseriesBlock.isNull(position) == false) {
                 BytesRef val = ((BytesRefBlock) timeseriesBlock).getBytesRef(timeseriesBlock.getFirstValueIndex(position), scratch);
-                timeseriesJson = val.utf8ToString();
+                // Typed metadata is opaque: only its rendering is JSON. The keyword column is the source JSON itself.
+                timeseriesJson = columns.get(timeseriesColIdx).type() == DataType.TIMESERIES_DATA_TYPE
+                    ? TimeSeriesMetadata.render(val)
+                    : val.utf8ToString();
             }
             collectMetricFromTimeseriesJson(metric, timeseriesJson);
         }

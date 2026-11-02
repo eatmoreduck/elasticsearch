@@ -7,6 +7,7 @@
 
 package org.elasticsearch.xpack.prometheus.rest;
 
+import org.apache.lucene.util.BytesRef;
 import org.elasticsearch.common.bytes.BytesReference;
 import org.elasticsearch.compute.data.BlockUtils;
 import org.elasticsearch.compute.data.Page;
@@ -19,8 +20,11 @@ import org.elasticsearch.xcontent.XContentParser;
 import org.elasticsearch.xcontent.XContentParserConfiguration;
 import org.elasticsearch.xcontent.XContentType;
 import org.elasticsearch.xpack.esql.action.ColumnInfoImpl;
+import org.elasticsearch.xpack.esql.core.type.DataType;
+import org.elasticsearch.xpack.esql.core.util.TimeSeriesMetadata;
 import org.elasticsearch.xpack.prometheus.rest.PrometheusQueryResponseListener.QueryMode;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -371,6 +375,37 @@ public class PrometheusQueryResponseListenerTests extends ESTestCase {
             assertThat(path.evaluate("data.result.0.metric.job"), equalTo("prometheus"));
             assertThat(path.evaluate("data.result.0.values.0"), equalTo(List.of(1735689600.0, "1.5")));
             assertThat(path.evaluate("data.result.0.values.1"), equalTo(List.of(1735689660.0, "2.0")));
+        }
+    }
+
+    public void testConvertRangeQueryWithTypedTimeseriesColumn() throws IOException {
+        // Typed _timeseries is read through its rendering, not its encoding; labels already carry their canonical names.
+        List<ColumnInfoImpl> columns = List.of(
+            col("value", "double"),
+            new ColumnInfoImpl("_timeseries", DataType.TIMESERIES_DATA_TYPE, null),
+            col("step", "long")
+        );
+        var encoded = new ByteArrayOutputStream();
+        TimeSeriesMetadata.of(Map.of("__name__", "http_requests_total", "job", "prometheus")).writeTo(encoded);
+
+        List<List<Object>> rows = List.of(
+            List.of(List.of(1.5, 2.0), new BytesRef(encoded.toByteArray()), List.of(1735689600000L, 1735689660000L))
+        );
+
+        try (
+            XContentBuilder builder = PrometheusQueryResponseListener.convertToPrometheusJson(
+                pagesOf(rows),
+                columns,
+                ZoneOffset.UTC,
+                "matrix",
+                QueryMode.RANGE
+            )
+        ) {
+            ObjectPath path = toObjectPath(builder);
+            assertSuccessMatrix(path);
+            assertThat(path.evaluate("data.result"), hasSize(1));
+            assertThat(path.evaluate("data.result.0.metric"), equalTo(Map.of("__name__", "http_requests_total", "job", "prometheus")));
+            assertThat(path.evaluate("data.result.0.values.0"), equalTo(List.of(1735689600.0, "1.5")));
         }
     }
 
