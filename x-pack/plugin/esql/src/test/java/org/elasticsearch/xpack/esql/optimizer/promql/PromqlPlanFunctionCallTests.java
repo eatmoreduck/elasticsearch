@@ -38,6 +38,7 @@ import org.elasticsearch.xpack.esql.plan.logical.Aggregate;
 import org.elasticsearch.xpack.esql.plan.logical.Eval;
 import org.elasticsearch.xpack.esql.plan.logical.Filter;
 import org.elasticsearch.xpack.esql.plan.logical.LogicalPlan;
+import org.elasticsearch.xpack.esql.plan.logical.PackDims;
 import org.elasticsearch.xpack.esql.plan.logical.Project;
 import org.elasticsearch.xpack.esql.plan.logical.TimeSeriesAggregate;
 import org.elasticsearch.xpack.esql.plan.logical.UnpackDims;
@@ -437,7 +438,10 @@ public class PromqlPlanFunctionCallTests extends AbstractPromqlPlanOptimizerTest
         assertThat(sumAgg.groupings(), hasSize(2));
         assertThat(sumAgg.aggregates().getFirst().collect(Sum.class), not(empty()));
 
-        var tsAgg = packedTimeSeriesAggregate(sumAgg.child(), 1);
+        // The label packs after the first pass, read as absent when empty.
+        var pack = as(sumAgg.child(), PackDims.class);
+        assertThat(Expressions.names(pack.dims()), contains("cluster"));
+        var tsAgg = as(as(pack.child(), Eval.class).child(), TimeSeriesAggregate.class);
         assertThat(Expressions.names(packedDims(tsAgg.aggregates())), contains("cluster"));
         assertThat(tsAgg.aggregates().getFirst().collect(LastOverTime.class), not(empty()));
     }
@@ -555,11 +559,12 @@ public class PromqlPlanFunctionCallTests extends AbstractPromqlPlanOptimizerTest
         List<Expression> expands = new ArrayList<>();
         plan.forEachExpressionDown(org.elasticsearch.xpack.esql.expression.promql.function.RegexExpand.class, expands::add);
         assertThat(expands, not(empty()));
-        // Outer regroup by the derived label (not only the per-series TSA).
+        // Outer regroup by the derived label (not only the per-series TSA), packed so a multivalued label stays one key.
         List<Aggregate> outer = plan.collect(Aggregate.class).stream().filter(a -> (a instanceof TimeSeriesAggregate) == false).toList();
         assertThat(outer, not(empty()));
         assertTrue(
-            outer.stream().anyMatch(a -> a.groupings().stream().anyMatch(g -> g instanceof Attribute attr && "dst".equals(attr.name())))
+            outer.stream()
+                .anyMatch(a -> a.child() instanceof PackDims pack && pack.dims().stream().anyMatch(dim -> "dst".equals(dim.name())))
         );
     }
 

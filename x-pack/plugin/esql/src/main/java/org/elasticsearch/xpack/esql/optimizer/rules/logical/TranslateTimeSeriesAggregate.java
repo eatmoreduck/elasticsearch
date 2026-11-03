@@ -24,7 +24,9 @@ import org.elasticsearch.xpack.esql.core.expression.NameId;
 import org.elasticsearch.xpack.esql.core.expression.NamedExpression;
 import org.elasticsearch.xpack.esql.core.expression.Nullability;
 import org.elasticsearch.xpack.esql.core.expression.ReferenceAttribute;
+import org.elasticsearch.xpack.esql.core.expression.TimeSeriesMetadataAttribute;
 import org.elasticsearch.xpack.esql.core.expression.function.Function;
+import org.elasticsearch.xpack.esql.core.tree.Source;
 import org.elasticsearch.xpack.esql.core.type.DataType;
 import org.elasticsearch.xpack.esql.core.util.CollectionUtils;
 import org.elasticsearch.xpack.esql.core.util.Holder;
@@ -38,10 +40,14 @@ import org.elasticsearch.xpack.esql.expression.function.aggregate.Values;
 import org.elasticsearch.xpack.esql.expression.function.grouping.Bucket;
 import org.elasticsearch.xpack.esql.expression.function.grouping.TBucket;
 import org.elasticsearch.xpack.esql.expression.function.grouping.TStep;
+import org.elasticsearch.xpack.esql.expression.function.scalar.conditional.Case;
 import org.elasticsearch.xpack.esql.expression.function.scalar.date.DateTrunc;
+import org.elasticsearch.xpack.esql.expression.function.scalar.multivalue.MvMax;
+import org.elasticsearch.xpack.esql.expression.predicate.operator.comparison.Equals;
 import org.elasticsearch.xpack.esql.plan.logical.Aggregate;
 import org.elasticsearch.xpack.esql.plan.logical.BinaryPlan;
 import org.elasticsearch.xpack.esql.plan.logical.EsRelation;
+import org.elasticsearch.xpack.esql.plan.logical.Eval;
 import org.elasticsearch.xpack.esql.plan.logical.LogicalPlan;
 import org.elasticsearch.xpack.esql.plan.logical.PackDims;
 import org.elasticsearch.xpack.esql.plan.logical.Project;
@@ -293,6 +299,7 @@ public final class TranslateTimeSeriesAggregate extends AnalyzerRules.Parameteri
             .forEach(extractTimeBucket);
         NamedExpression timeBucket = timeBucketRef.get();
         boolean[] packPositions = new boolean[aggregate.groupings().size()];
+        List<Alias> absentIfEmpty = new ArrayList<>();
         for (int i = 0; i < aggregate.groupings().size(); i++) {
             var group = aggregate.groupings().get(i);
             if (group instanceof Attribute || group instanceof Alias) {
@@ -329,6 +336,7 @@ public final class TranslateTimeSeriesAggregate extends AnalyzerRules.Parameteri
                                 packDimensions,
                                 unpackDimensions,
                                 packPositions,
+                                absentIfEmpty,
                                 aggregate.origin() == TimeSeriesAggregate.Origin.PROMQL_COMMAND
                                     && a.dataType() != DataType.TIMESERIES_DATA_TYPE,
                                 i
@@ -382,7 +390,7 @@ public final class TranslateTimeSeriesAggregate extends AnalyzerRules.Parameteri
         } else {
             PackDims packDims = new PackDims(
                 aggregate.source(),
-                firstPhase,
+                absentIfEmpty.isEmpty() ? firstPhase : new Eval(aggregate.source(), firstPhase, absentIfEmpty),
                 packDimensions,
                 PackDims.newPackedAttribute(aggregate.source())
             );
@@ -488,6 +496,7 @@ public final class TranslateTimeSeriesAggregate extends AnalyzerRules.Parameteri
         List<Attribute> packDimensions,
         List<Attribute> unpackDimensions,
         boolean[] packPositions,
+        List<Alias> absentIfEmpty,
         boolean promqlLabel,
         int position
     ) {
@@ -497,7 +506,15 @@ public final class TranslateTimeSeriesAggregate extends AnalyzerRules.Parameteri
         var valuesAgg = new Alias(group.source(), group.name(), valuesAggregate(context, attribute, dimension));
         firstPassAggs.add(valuesAgg);
         if (dimension) {
-            packDimensions.add(valuesAgg.toAttribute());
+            if (promqlLabel && DataType.isString(attribute.dataType()) && attribute instanceof TimeSeriesMetadataAttribute == false) {
+                // PromQL has no empty label: a series whose label is empty groups with one that lacks it, so the label
+                // packs as absent. Each series reads it once, after the first pass.
+                Alias absent = absentIfEmpty(group.source(), group.name(), valuesAgg.toAttribute());
+                absentIfEmpty.add(absent);
+                packDimensions.add(absent.toAttribute());
+            } else {
+                packDimensions.add(valuesAgg.toAttribute());
+            }
             unpackDimensions.add(
                 new ReferenceAttribute(group.source(), null, group.name(), attribute.dataType(), Nullability.TRUE, group.id(), false)
             );
@@ -511,6 +528,15 @@ public final class TranslateTimeSeriesAggregate extends AnalyzerRules.Parameteri
             }
             secondPassGroupings.add(new Alias(group.source(), group.name(), values, group.id()));
         }
+    }
+
+    /**
+     * {@code label} as null when it is empty. A multivalued label is empty only when all its values are, which its largest
+     * value tells without a single-value comparison and its warning.
+     */
+    private static Alias absentIfEmpty(Source source, String name, Attribute label) {
+        Expression empty = new Equals(source, new MvMax(source, label), Literal.keyword(source, ""));
+        return new Alias(source, name, new Case(source, empty, List.of(Literal.NULL, label)));
     }
 
     private static List<? extends NamedExpression> mergeExpressions(
