@@ -1101,9 +1101,10 @@ public class PromqlCommand extends UnaryPlan implements TelemetryAware, Timestam
      *   <li>Scalar operands are illegal for set operators in PromQL itself; we mirror Prometheus' wording.</li>
      *   <li>{@code and} (INTERSECT) is supported: it keeps left series that match on the right (default or
      *       {@code on}/{@code ignoring}).</li>
-     *   <li>{@code unless} (SUBTRACT) is supported for default matching between operands with the same label set: it
-     *       keeps left series with no match on the right. {@code unless} with {@code on}/{@code ignoring}, or between
-     *       label sets that never match, still needs an anti-join ({@code #158179}).</li>
+     *   <li>{@code unless} (SUBTRACT) is supported for default matching between operands with the same label set, and with
+     *       {@code on}/{@code ignoring}, which joins the right operand's match keys: it keeps left series with no match on
+     *       the right. Default matching between label sets that never match still folds to the empty vector
+     *       ({@code #158179}).</li>
      *   <li>{@code or} is supported as a top-level or nested chain without {@code on}/{@code ignoring}
      *       ({@code #158182}), and as the empty-guard idiom {@code <labelless> or on () <labelless>}
      *       (typically {@code sum(...) or on () vector(1)}).</li>
@@ -1118,11 +1119,7 @@ public class PromqlCommand extends UnaryPlan implements TelemetryAware, Timestam
             return;
         }
         if (setOp.op() == VectorBinarySet.SetOp.SUBTRACT) {
-            if (setOp.match() != VectorMatch.NONE) {
-                // TODO: Support unless with on/ignoring (anti-join).
-                // https://github.com/elastic/elasticsearch/issues/158179
-                failures.add(fail(setOp, "set operator [unless] with on/ignoring is not supported at this time [{}]", setOp.sourceText()));
-            } else if (setOp.subtractOperandsNeverShareGroups()) {
+            if (setOp.subtractOperandsNeverShareGroups()) {
                 // The fold would return the empty vector where Prometheus keeps the whole left operand.
                 failures.add(
                     fail(
