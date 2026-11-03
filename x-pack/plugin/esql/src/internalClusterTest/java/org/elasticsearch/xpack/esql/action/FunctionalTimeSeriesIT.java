@@ -385,6 +385,38 @@ public class FunctionalTimeSeriesIT extends AbstractEsqlIntegTestCase {
         }
     }
 
+    /**
+     * topk, bottomk, limitk and limit_ratio with without(...) partition by every label but the listed ones and the metric
+     * name, and keep each selected series with all of its labels, as Prometheus does.
+     */
+    public void testReductionsWithoutPartitionByTheRestOfTheLabels() {
+        createMetricsIndex(INDEX);
+        index(INDEX, "cluster", "prod", "host", "a", "tx", 1.0);
+        index(INDEX, "cluster", "prod", "host", "b", "tx", 2.0);
+        index(INDEX, "cluster", "dev", "host", "a", "tx", 3.0);
+        index(INDEX, "cluster", "dev", "host", "b", "tx", 4.0);
+        refresh(INDEX);
+        String prodA = "{\"cluster\":\"prod\",\"host\":\"a\"}";
+        String prodB = "{\"cluster\":\"prod\",\"host\":\"b\"}";
+        String devA = "{\"cluster\":\"dev\",\"host\":\"a\"}";
+        String devB = "{\"cluster\":\"dev\",\"host\":\"b\"}";
+
+        assertRows(query("topk without (host) (1, tx)") + " | KEEP result, _timeseries", List.of(List.of(2.0, prodB), List.of(4.0, devB)));
+        assertRows(
+            query("bottomk without (host) (1, tx)") + " | KEEP result, _timeseries",
+            List.of(List.of(1.0, prodA), List.of(3.0, devA))
+        );
+        assertRows(query("topk without (host, cluster) (1, tx)") + " | KEEP result, _timeseries", List.of(List.of(4.0, devB)));
+        assertRows(
+            query("count by (cluster) (limitk without (host) (1, tx))") + " | KEEP result, cluster",
+            List.of(List.of(1.0, "prod"), List.of(1.0, "dev"))
+        );
+        assertRows(
+            query("limit_ratio without (host) (1, tx)") + " | KEEP result, _timeseries",
+            List.of(List.of(1.0, prodA), List.of(2.0, prodB), List.of(3.0, devA), List.of(4.0, devB))
+        );
+    }
+
     /** Reject result names that collide with labels/metadata before the plan consistency checker. */
     public void testResultNameMustNotShadowLabelsOrMetadata() {
         createMetricsIndex(INDEX);
