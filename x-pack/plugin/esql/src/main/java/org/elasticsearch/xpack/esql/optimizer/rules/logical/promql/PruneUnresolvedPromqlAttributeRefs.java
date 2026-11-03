@@ -379,11 +379,13 @@ public final class PruneUnresolvedPromqlAttributeRefs extends ParameterizedRule<
             return bySeries ? new Project(source, collapse, collapse.output()) : collapse;
         }
 
-        /** The {@code _tsid} the source of {@code plan} already reads, or null. */
+        /** The {@code _tsid} the source relation of {@code plan} already reads, or null: a relation reads it at most once. */
         private static @Nullable Attribute seriesId(LogicalPlan plan) {
-            for (Attribute attribute : plan.output()) {
-                if (attribute instanceof MetadataAttribute && MetadataAttribute.TSID_FIELD.equals(attribute.name())) {
-                    return attribute;
+            for (EsRelation relation : plan.collect(EsRelation.class)) {
+                for (Attribute attribute : relation.output()) {
+                    if (attribute instanceof MetadataAttribute && MetadataAttribute.TSID_FIELD.equals(attribute.name())) {
+                        return attribute;
+                    }
                 }
             }
             return null;
@@ -419,7 +421,7 @@ public final class PruneUnresolvedPromqlAttributeRefs extends ParameterizedRule<
             LogicalPlan child = resolve(pack.child(), concat(keys.pushed(), own));
             Binding binding = bind(pack, child, own, keys.all());
             List<Attribute> dims = keys.all().stream().map(binding::column).toList();
-            PackDims packed = new PackDims(pack.source(), binding.plan(), dims, pack.packed());
+            PackDims packed = new PackDims(pack.source(), binding.plan(), dims, pack.packed(), pack.emptyAsAbsent());
             Aggregate regrouped = (Aggregate) binding.apply(
                 new Aggregate(aggregate.source(), packed, aggregate.groupings(), wrapValues(aggregate.aggregates()))
             );
