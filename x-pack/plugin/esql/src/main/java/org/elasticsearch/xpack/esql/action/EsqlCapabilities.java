@@ -2682,8 +2682,7 @@ public class EsqlCapabilities {
 
         /**
          * Initial support for simple binary comparisons in PromQL.
-         * Unmatched comparisons require a scalar literal on the right-hand side; nesting under
-         * aggregations / {@code label_replace} / reductions is supported.
+         * Only top-level comparisons are supported where the right-hand side is a scalar.
          */
         PROMQL_BINARY_COMPARISON_V0,
 
@@ -2813,6 +2812,14 @@ public class EsqlCapabilities {
          * Gates csv-spec coverage of those shapes.
          */
         PROMQL_BINARY_OPAQUE_SIGNATURE_MATCH(PROMQL_COMMAND_V0.isEnabled()),
+
+        /**
+         * PromQL shapes the translation admits by reading labels through references bound after it, rather than from
+         * concrete label columns: the {@code and} and {@code unless} set operators, vector matching between operands whose
+         * labels stay in time-series metadata, and unmatched comparisons nested under aggregations, {@code label_replace}
+         * or reductions. Gates csv-spec coverage of those shapes.
+         */
+        PROMQL_LABEL_REFERENCES(PROMQL_COMMAND_V0.isEnabled()),
 
         /**
          * Support for the {@code TS_COLLAPSE} pipe command, which collapses PromQL results

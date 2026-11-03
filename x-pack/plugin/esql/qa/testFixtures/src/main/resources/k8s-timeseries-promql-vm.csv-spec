@@ -61,6 +61,7 @@ ratio:double       | step:datetime            | cluster:keyword
 vector_match_on_cluster_opaque_operands
 required_capability: promql_command_v0
 required_capability: promql_vector_matching_v0
+required_capability: promql_label_references
 PROMQL index=k8s step=10m ratio=(sum without (pod, region) (network.eth0.tx) / on (cluster) sum without (pod, region) (network.eth0.rx))
 | KEEP ratio, step, cluster
 | SORT cluster, step;
@@ -202,6 +203,7 @@ result:double | step:datetime            | cluster:keyword
 vector_match_and_keeps_all
 required_capability: promql_command_v0
 required_capability: promql_vector_matching_v0
+required_capability: promql_label_references
 PROMQL index=k8s step=10m result=(sum by (cluster) (network.eth0.tx) and on (cluster) sum by (cluster) (network.eth0.rx))
 | SORT cluster, step;
 
@@ -221,6 +223,7 @@ result:double | step:datetime            | cluster:keyword
 vector_match_and_filters
 required_capability: promql_command_v0
 required_capability: promql_vector_matching_v0
+required_capability: promql_label_references
 PROMQL index=k8s step=10m result=(sum by (cluster) (network.eth0.tx) and on (cluster) sum by (cluster) (network.eth0.rx{cluster="prod"}))
 | SORT cluster, step;
 
@@ -355,6 +358,7 @@ result:double | step:datetime            | cluster:keyword
 vector_match_and_default
 required_capability: promql_command_v0
 required_capability: promql_vector_matching_v0
+required_capability: promql_label_references
 PROMQL index=k8s step=10m result=(sum by (cluster) (network.eth0.tx) and sum by (cluster) (network.eth0.rx))
 | SORT cluster, step;
 
@@ -687,6 +691,7 @@ ratio:double        | step:datetime            | cluster:keyword | pod:keyword
 vector_match_and_ignoring
 required_capability: promql_command_v0
 required_capability: promql_vector_matching_v0
+required_capability: promql_label_references
 PROMQL index=k8s step=10m result=(sum by (cluster, pod) (network.eth0.tx) and ignoring (pod) sum by (cluster) (network.eth0.rx{cluster="prod"}))
 | SORT cluster, pod, step;
 
@@ -829,6 +834,7 @@ r:double           | cluster:keyword | pod:keyword | step:datetime
 vector_match_matrix_opaque_opaque_on
 required_capability: promql_command_v0
 required_capability: promql_vector_matching_v0
+required_capability: promql_label_references
 PROMQL index=k8s step=10m r=(network.eth0.tx / on (cluster, pod) network.eth0.rx)
 | WHERE cluster == "prod" AND step == "2024-05-10T00:10:00.000Z"
 | KEEP r, cluster, pod, step
@@ -844,6 +850,7 @@ r:double           | cluster:keyword | pod:keyword | step:datetime
 vector_match_matrix_opaque_concrete
 required_capability: promql_command_v0
 required_capability: promql_vector_matching_v0
+required_capability: promql_label_references
 PROMQL index=k8s step=10m r=(network.eth0.tx / on (cluster, pod) sum by (cluster, pod) (network.eth0.rx))
 | WHERE cluster == "prod" AND step == "2024-05-10T00:10:00.000Z"
 | KEEP r, cluster, pod, step
@@ -859,6 +866,7 @@ r:double           | cluster:keyword | pod:keyword | step:datetime
 vector_match_matrix_concrete_opaque
 required_capability: promql_command_v0
 required_capability: promql_vector_matching_v0
+required_capability: promql_label_references
 PROMQL index=k8s step=10m r=(sum by (cluster, pod) (network.eth0.tx) / on (cluster, pod) network.eth0.rx)
 | WHERE cluster == "prod" AND step == "2024-05-10T00:10:00.000Z"
 | KEEP r, cluster, pod, step
@@ -1003,6 +1011,7 @@ r:double            | region:keyword | _timeseries:_timeseries
 vector_match_matrix_without_identity
 required_capability: promql_command_v0
 required_capability: promql_vector_matching_v0
+required_capability: promql_label_references
 PROMQL index=k8s step=10m r=(sum without (pod) (network.eth0.tx) / on (cluster) sum by (cluster) (network.eth0.rx))
 | WHERE cluster == "prod" AND step == "2024-05-10T00:10:00.000Z"
 | KEEP r, cluster, step;
@@ -1016,6 +1025,7 @@ r:double          | cluster:keyword | step:datetime
 vector_match_matrix_nested_join
 required_capability: promql_command_v0
 required_capability: promql_vector_matching_v0
+required_capability: promql_label_references
 PROMQL index=k8s step=10m r=(sum(network.eth0.tx / on (cluster, pod) network.eth0.rx))
 | WHERE step == "2024-05-10T00:10:00.000Z"
 | EVAL r = ROUND(r, 9)
@@ -1029,6 +1039,7 @@ r:double    | step:datetime
 vector_match_matrix_comparison_bool
 required_capability: promql_command_v0
 required_capability: promql_vector_matching_v0
+required_capability: promql_label_references
 PROMQL index=k8s step=10m r=(network.eth0.tx > bool on (cluster, pod) network.eth0.rx)
 | WHERE cluster == "prod" AND step == "2024-05-10T00:10:00.000Z"
 | KEEP r, cluster, pod, step
@@ -1227,6 +1238,7 @@ result:double | step:datetime            | cluster:keyword
 vector_match_nested_join_in_and
 required_capability: promql_command_v0
 required_capability: promql_vector_matching_v0
+required_capability: promql_label_references
 PROMQL index=k8s step=10m result=((sum by (cluster) (network.eth0.tx) / on (cluster) sum by (cluster) (network.eth0.rx)) and on (cluster) sum by (cluster) (network.eth0.rx{cluster="prod"}))
 | SORT cluster, step;
 
