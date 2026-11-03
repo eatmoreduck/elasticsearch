@@ -133,6 +133,18 @@ public class PromqlVerifierTests extends ESTestCase {
         );
     }
 
+    /** The result's time-series metadata is its {@code _timeseries} column, so the value column cannot take that name. */
+    public void testResultColumnTimeSeriesCollision() {
+        for (TestAnalyzer analyzer : List.of(keywordTsdb, tsdb)) {
+            analyzer.error(
+                "PROMQL index=test step=5m _timeseries=(network.bytes_in)",
+                containsString("result column [_timeseries] collides with the time-series metadata column")
+            );
+            // A result without metadata exposes no _timeseries column to collide with.
+            assertTrue(analyzer.query("PROMQL index=test step=5m _timeseries=(sum(network.bytes_in))").resolved());
+        }
+    }
+
     private static List<String> nestedWithoutAggregations() {
         return List.of(
             "sum without(cluster)(max without(pod)(network.bytes_in))",

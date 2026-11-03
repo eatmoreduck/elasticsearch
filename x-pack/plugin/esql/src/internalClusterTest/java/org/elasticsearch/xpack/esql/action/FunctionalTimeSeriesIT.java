@@ -390,13 +390,10 @@ public class FunctionalTimeSeriesIT extends AbstractEsqlIntegTestCase {
         createMetricsIndex(INDEX);
         index(INDEX, "cluster", "prod", "host", "a", "tx", 7.0);
         refresh(INDEX);
-        for (String query : List.of(
-            query("sum by(cluster)(tx)").replace(" result=", " cluster="),
-            query("tx").replace(" result=", " _timeseries=")
-        )) {
-            var error = expectThrows(VerificationException.class, () -> run(query));
-            assertThat(error.getMessage(), containsString("result column"));
-        }
+        var label = expectThrows(VerificationException.class, () -> run(query("sum by(cluster)(tx)").replace(" result=", " cluster=")));
+        assertThat(label.getMessage(), containsString("label [cluster] collides with the built-in [cluster] output column"));
+        var metadata = expectThrows(VerificationException.class, () -> run(query("tx").replace(" result=", " _timeseries=")));
+        assertThat(metadata.getMessage(), containsString("result column [_timeseries] collides with the time-series metadata column"));
     }
 
     public void testPromotedLabelRetainsSelectorFilter() {

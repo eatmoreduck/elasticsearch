@@ -625,6 +625,11 @@ public class PromqlCommand extends UnaryPlan implements TelemetryAware, Timestam
     /** Verifies the PromQL constructs translation supports. */
     public void verify(Failures failures, AnalyzerContext analyzer) {
         LogicalPlan p = promqlPlan();
+        if (MetadataAttribute.isTimeSeriesAttributeName(valueColumnName) && PromqlLabels.metadataLabel(p.output()) != null) {
+            // The result's time-series metadata is exposed under this name; a value column under it would shadow it.
+            failures.add(fail(this, "result column [{}] collides with the time-series metadata column", valueColumnName));
+            return;
+        }
         boolean hasStep = step.value() != null;
         boolean hasRangeAndBuckets = start.value() != null && end.value() != null && buckets.value() != null;
         if (isInstantQuery() == false && hasStep == false && hasRangeAndBuckets == false) {
