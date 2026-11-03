@@ -438,10 +438,11 @@ public class PromqlPlanFunctionCallTests extends AbstractPromqlPlanOptimizerTest
         assertThat(sumAgg.groupings(), hasSize(2));
         assertThat(sumAgg.aggregates().getFirst().collect(Sum.class), not(empty()));
 
-        // The label packs after the first pass, read as absent when empty.
+        // The label packs after the first pass, an empty value as absent.
         var pack = as(sumAgg.child(), PackDims.class);
         assertThat(Expressions.names(pack.dims()), contains("cluster"));
-        var tsAgg = as(as(pack.child(), Eval.class).child(), TimeSeriesAggregate.class);
+        assertTrue(pack.emptyAsAbsent());
+        var tsAgg = as(pack.child(), TimeSeriesAggregate.class);
         assertThat(Expressions.names(packedDims(tsAgg.aggregates())), contains("cluster"));
         assertThat(tsAgg.aggregates().getFirst().collect(LastOverTime.class), not(empty()));
     }
