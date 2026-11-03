@@ -734,7 +734,7 @@ public class PromqlCommand extends UnaryPlan implements TelemetryAware, Timestam
                 case HistogramFunctionCall histogram -> {
                     LogicalPlan buckets = histogram.child();
                     // Classic histograms regroup by every label but `le` via unresolved metadata/label refs
-                    // (HistogramFunctionCall); BindPromqlLabelReferences materializes them from time-series metadata when it can.
+                    // (HistogramFunctionCall); PruneUnresolvedPromqlAttributeRefs materializes them from time-series metadata when it can.
                     // Cases that still need a BY first (keyword metadata that cannot be refined) fail in binding instead.
                     if (readsNativeHistograms(buckets) == false
                         && selectsMappedMetric(buckets)
