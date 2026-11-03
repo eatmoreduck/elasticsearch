@@ -2754,10 +2754,9 @@ public class EsqlCapabilities {
 
         /**
          * Typed time-series metadata: {@code _timeseries} as a typed column, the {@code TS_*} functions over it, and the
-         * PromQL shapes that modify it; also the release gate for that behavior. Disabled until PromQL exposes the typed
-         * column end to end.
+         * PromQL shapes that modify it. Snapshot-only until released; also the release gate for that behavior.
          */
-        PROMQL_ENABLE_TIMESERIES_TYPE(false),
+        PROMQL_ENABLE_TIMESERIES_TYPE(Build.current().isSnapshot()),
 
         /**
          * Corrected output shape for PromQL {@code without}: a {@code without} over a concrete-output child (e.g.
