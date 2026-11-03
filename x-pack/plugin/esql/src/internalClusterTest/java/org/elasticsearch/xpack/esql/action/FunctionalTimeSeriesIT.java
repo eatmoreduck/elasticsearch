@@ -433,6 +433,31 @@ public class FunctionalTimeSeriesIT extends AbstractEsqlIntegTestCase {
         assertRows(query("tx > bool scalar(avg(tx))") + " | KEEP result", List.of(List.of(0.0), List.of(1.0)));
     }
 
+    /**
+     * A filter comparison keeps or drops each series on its own, whatever its consumer groups or matches by: series sharing
+     * the labels a by() or an on() reads are compared one by one, not merged first. bool yields 1 or 0 to aggregate.
+     */
+    public void testComparisonFiltersEachSeriesUnderGroupingAndMatching() {
+        createMetricsIndex(INDEX);
+        index(INDEX, "cluster", "prod", "host", "a", "region", "east", "tx", 1.0);
+        index(INDEX, "cluster", "prod", "host", "b", "region", "east", "tx", 3.0);
+        index(INDEX, "cluster", "prod", "host", "c", "region", "west", "tx", 5.0);
+        refresh(INDEX);
+        String a = "{\"cluster\":\"prod\",\"host\":\"a\",\"region\":\"east\"}";
+        String b = "{\"cluster\":\"prod\",\"host\":\"b\",\"region\":\"east\"}";
+        String c = "{\"cluster\":\"prod\",\"host\":\"c\",\"region\":\"west\"}";
+
+        assertRows(query("sum by (region) (tx > 2)") + " | KEEP result, region", List.of(List.of(3.0, "east"), List.of(5.0, "west")));
+        assertRows(query("sum by (region) (tx > bool 2)") + " | KEEP result, region", List.of(List.of(1.0, "east"), List.of(1.0, "west")));
+        assertRows(
+            query("tx and on(region) (tx > 2)") + " | KEEP result, _timeseries",
+            List.of(List.of(1.0, a), List.of(3.0, b), List.of(5.0, c))
+        );
+        assertRows(query("tx and on(region) (tx > 4)") + " | KEEP result, _timeseries", List.of(List.of(5.0, c)));
+        assertRows(query("tx unless on(region) (tx > 4)") + " | KEEP result, _timeseries", List.of(List.of(1.0, a), List.of(3.0, b)));
+        assertRows(query("tx unless ignoring(host) (tx > 2)") + " | KEEP result, _timeseries", List.of());
+    }
+
     /** Reject result names that collide with labels/metadata before the plan consistency checker. */
     public void testResultNameMustNotShadowLabelsOrMetadata() {
         createMetricsIndex(INDEX);

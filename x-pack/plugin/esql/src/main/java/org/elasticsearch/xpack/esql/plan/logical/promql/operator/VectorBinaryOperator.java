@@ -378,6 +378,15 @@ public abstract sealed class VectorBinaryOperator extends BinaryPlan implements 
     }
 
     /**
+     * The identity of each series of {@code operand}. A filter keeps or drops whole series, so the collapse it filters keeps
+     * one row per series, however few labels the filter's consumer reads: keyed by those labels alone, the collapse would
+     * merge the series sharing them into one multivalued value and compare that instead.
+     */
+    private List<Attribute> seriesIdentity(LogicalPlan operand) {
+        return UnresolvedPromqlAttribute.tsIdentity(source(), operand.output());
+    }
+
+    /**
      * Scalar with no source-backed selector: a literal, {@code time()}, {@code pi()}, or arithmetic over those.
      * Contrasts with {@code scalar(sum(...))}, which collapses source data and must broadcast independently.
      */
@@ -446,7 +455,9 @@ public abstract sealed class VectorBinaryOperator extends BinaryPlan implements 
         IntermediateResult left = context.translate(left());
         if (this instanceof VectorBinaryComparison comp && comp.filterMode() && right() instanceof LiteralSelector lit) {
             // Filter-mode comparison (v > lit): keep the left value, drop non-matching rows.
-            IntermediateResult table = left.kind().afterInitialAggregation ? left : context.emitInitialAggregate(left, left.value());
+            IntermediateResult table = left.kind().afterInitialAggregation
+                ? left
+                : context.emitInitialAggregate(left, seriesIdentity(left()), left.value());
             Expression value = new ToDouble(table.value().source(), table.value());
             Expression threshold = new ToDouble(lit.source(), lit.literal());
             Expression condition = comp.op().asFunction().create(source(), value, threshold, context.configuration());
@@ -468,10 +479,14 @@ public abstract sealed class VectorBinaryOperator extends BinaryPlan implements 
         boolean mixed = left.kind().afterInitialAggregation != right.kind().afterInitialAggregation;
         if (filterModeVector || (mixed && scalarOperand == false)) {
             if (left.kind().afterInitialAggregation == false) {
-                left = context.emitInitialAggregate(left, left.value());
+                left = filterModeVector
+                    ? context.emitInitialAggregate(left, seriesIdentity(left()), left.value())
+                    : context.emitInitialAggregate(left, left.value());
             }
             if (right.kind().afterInitialAggregation == false) {
-                right = context.emitInitialAggregate(right, right.value());
+                right = filterModeVector
+                    ? context.emitInitialAggregate(right, seriesIdentity(right()), right.value())
+                    : context.emitInitialAggregate(right, right.value());
             }
         }
         boolean collapsed = left.kind().afterInitialAggregation && right.kind().afterInitialAggregation;
@@ -561,6 +576,9 @@ public abstract sealed class VectorBinaryOperator extends BinaryPlan implements 
             plan = new Filter(source(), plan, binaryExpr);
             // A filter keeps the vector's value, wherever the scalar sits, as Prometheus does.
             binaryExpr = PromqlPlan.returnsScalar(left()) ? rightExpr : leftExpr;
+        } else if (this instanceof VectorBinaryComparison) {
+            // bool yields 1 or 0: a number, which an enclosing aggregate reads like any other value
+            binaryExpr = new ToDouble(source(), binaryExpr);
         }
         IntermediateResult result = new IntermediateResult(plan, null, step, filter, kind);
         return context.eval(result, binaryExpr);
