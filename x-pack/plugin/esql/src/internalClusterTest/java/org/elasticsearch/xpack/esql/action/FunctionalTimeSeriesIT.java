@@ -954,7 +954,7 @@ public class FunctionalTimeSeriesIT extends AbstractEsqlIntegTestCase {
         );
     }
 
-    /** (… or …) * scalar must pin UnionAll layout before the composed Eval (#158164). */
+    /** (... or ...) * scalar must pin UnionAll layout before the composed Eval (#158164). */
     public void testOrUnderArithmetic() {
         createMetricsIndex(INDEX);
         index(INDEX, "cluster", "prod", "host", "a", "tx", 10.0);
@@ -969,7 +969,7 @@ public class FunctionalTimeSeriesIT extends AbstractEsqlIntegTestCase {
         index(INDEX, "cluster", "prod", "host", "a", "tx", 10.0);
         index(INDEX, "cluster", "prod", "host", "b", "tx", 20.0);
         refresh(INDEX);
-        // join path: or × by-agg vector (series-preserving so labels match)
+        // join path: or x by-agg vector (series-preserving so labels match)
         assertRows(
             query("((max by (cluster)(tx)) or (min by (cluster)(tx))) * (min by (cluster) (floor(tx)))") + " | KEEP result, cluster",
             List.of(List.of(200.0, "prod"))
@@ -1006,7 +1006,7 @@ public class FunctionalTimeSeriesIT extends AbstractEsqlIntegTestCase {
             query("label_replace(min(sum by (cluster)(tx)), \"role\", \"v\", \"host\", \"nomatch\")") + " | KEEP result",
             List.of(List.of(30.0))
         );
-        // "$1" with no capture → empty expansion → delete dst; must still match unreplac'd left (promfuzz-vm 493 shape)
+        // "$1" with no capture -> empty expansion -> delete dst; must still match unreplac'd left (promfuzz-vm 493 shape)
         assertRows(
             query("(sum by (cluster)(tx))" + " / label_replace(sum by (cluster)(tx), \"role\", \"$1\", \"cluster\", \".+\")")
                 + " | KEEP result, cluster",
@@ -1034,7 +1034,7 @@ public class FunctionalTimeSeriesIT extends AbstractEsqlIntegTestCase {
     /** raw or rate(...) of the same non-name labels keeps only the left limb. */
     public void testOrCrossMetricRawOrRateKeepsLeftOnly() {
         createMetricsIndexWithRx(INDEX);
-        // Two samples so rate() is defined — still dropped by or-match ignoring __name__.
+        // Two samples so rate() is defined - still dropped by or-match ignoring __name__.
         indexAt(INDEX, "2024-05-10T00:00:00Z", "cluster", "prod", "host", "a", LabelMatcher.NAME, "rx", "rx", 0.0);
         indexAt(INDEX, "2024-05-10T00:00:00Z", "cluster", "prod", "host", "a", LabelMatcher.NAME, "tx", "tx", 0.0);
         indexAt(INDEX, "2024-05-10T00:01:00Z", "cluster", "prod", "host", "a", LabelMatcher.NAME, "rx", "rx", 60.0);
@@ -1068,7 +1068,7 @@ public class FunctionalTimeSeriesIT extends AbstractEsqlIntegTestCase {
         createMetricsIndexWithRx(INDEX);
         index(INDEX, "cluster", "prod", "host", "a", LabelMatcher.NAME, "rx", "rx", 60.0);
         index(INDEX, "cluster", "prod", "host", "b", LabelMatcher.NAME, "rx", "rx", 80.0);
-        // tx present but only one sample → rate(tx[1m]) empty
+        // tx present but only one sample -> rate(tx[1m]) empty
         index(INDEX, "cluster", "prod", "host", "a", LabelMatcher.NAME, "tx", "tx", 120.0);
         refresh(INDEX);
         List<List<Object>> expected = List.of(
@@ -1103,13 +1103,13 @@ public class FunctionalTimeSeriesIT extends AbstractEsqlIntegTestCase {
             List.of(60.0, "{\"__name__\":\"rx\",\"cluster\":\"prod\",\"host\":\"a\"}"),
             List.of(80.0, "{\"__name__\":\"rx\",\"cluster\":\"prod\",\"host\":\"b\"}")
         );
-        // Empty selector × ignoring: must be empty, not the right operand.
+        // Empty selector x ignoring: must be empty, not the right operand.
         assertRows(query("(rx{host=\"nope\"}) * ignoring (host) (tx)") + " | KEEP result, _timeseries", List.of());
         // Empty rate limb on the left (single tx sample) must not strip labels from the raw right.
         assertRows(query("(rate(tx[1m])) or (rx)") + " | KEEP result, _timeseries", expected);
-        // Empty matcher left of or → raw right with full fingerprints.
+        // Empty matcher left of or -> raw right with full fingerprints.
         assertRows(query("(rx{host=\"nope\"}) or (rx)") + " | KEEP result, _timeseries", expected);
-        // Empty arith/compare left of or → same (promfuzz-vm 436).
+        // Empty arith/compare left of or -> same (promfuzz-vm 436).
         assertRows(query("(((rx{host=\"nope\"}) * ignoring (host) (tx)) == (rx)) or (rx)") + " | KEEP result, _timeseries", expected);
     }
 
@@ -1124,7 +1124,7 @@ public class FunctionalTimeSeriesIT extends AbstractEsqlIntegTestCase {
             query("label_replace(rx, \"tier\", \"x-$1\", \"host\", \"(.*)\")") + " | KEEP result, tier, _timeseries",
             List.of(List.of(20.0, "x-b", "{\"__name__\":\"rx\",\"cluster\":\"prod\",\"host\":\"b\"}"))
         );
-        // Different hosts → or keeps both; right still exposes tier.
+        // Different hosts -> or keeps both; right still exposes tier.
         assertRows(
             query("(floor(tx)) or (label_replace(rx, \"tier\", \"x-$1\", \"host\", \"(.*)\"))") + " | KEEP result, tier, _timeseries",
             List.of(
@@ -1132,7 +1132,7 @@ public class FunctionalTimeSeriesIT extends AbstractEsqlIntegTestCase {
                 Arrays.asList(20.0, "x-b", "{\"__name__\":\"rx\",\"cluster\":\"prod\",\"host\":\"b\"}")
             )
         );
-        // Fuzz 050 shape: empty right (label_replace × and-ignoring does not match on tier) must not wipe left labels.
+        // Fuzz 050 shape: empty right (label_replace x and-ignoring does not match on tier) must not wipe left labels.
         assertRows(
             query(
                 "(floor(tx)) or (label_replace(rx, \"tier\", \"x-$1\", \"host\", \".+\") " + "and ((rx) and ignoring (host, cluster) (tx)))"
@@ -1183,7 +1183,7 @@ public class FunctionalTimeSeriesIT extends AbstractEsqlIntegTestCase {
         );
     }
 
-    /** Default matching: labeled × labelless is empty (not scalar broadcast). */
+    /** Default matching: labeled x labelless is empty (not scalar broadcast). */
     public void testArithLabeledTimesUnlabeledIsEmpty() {
         createMetricsIndex(INDEX);
         index(INDEX, "cluster", "prod", "host", "a", "tx", 10.0);
@@ -1195,7 +1195,7 @@ public class FunctionalTimeSeriesIT extends AbstractEsqlIntegTestCase {
             List.of(List.of(10.0, "{\"host\":\"a\"}"), List.of(20.0, "{\"host\":\"b\"}"))
         );
         assertRows(query("sum without (cluster, host) (tx)") + " | KEEP result, _timeseries", List.of(List.of(30.0, "{}")));
-        // Default matching: {host} × {} is empty (not scalar broadcast).
+        // Default matching: {host} x {} is empty (not scalar broadcast).
         try (
             EsqlQueryResponse response = run(
                 query("(max without (cluster) (tx)) * (sum without (cluster, host) (tx))") + " | KEEP result, _timeseries"
@@ -1203,7 +1203,7 @@ public class FunctionalTimeSeriesIT extends AbstractEsqlIntegTestCase {
         ) {
             assertOk(response);
             var actual = EsqlTestUtils.getValuesList(response);
-            assertThat("labeled×labelless must be empty; actual=" + actual, actual, equalTo(List.of()));
+            assertThat("labeled x labelless must be empty; actual=" + actual, actual, equalTo(List.of()));
         }
     }
 
@@ -1212,7 +1212,7 @@ public class FunctionalTimeSeriesIT extends AbstractEsqlIntegTestCase {
         createMetricsIndexWithRx(INDEX);
         index(INDEX, "cluster", "prod", "host", "a", LabelMatcher.NAME, "rx", "rx", 60.0);
         index(INDEX, "cluster", "prod", "host", "b", LabelMatcher.NAME, "rx", "rx", 80.0);
-        // tx exists but host filter matches nothing → empty right
+        // tx exists but host filter matches nothing -> empty right
         index(INDEX, "cluster", "prod", "host", "a", LabelMatcher.NAME, "tx", "tx", 1.0);
         refresh(INDEX);
         List<List<Object>> expected = List.of(
@@ -1246,7 +1246,7 @@ public class FunctionalTimeSeriesIT extends AbstractEsqlIntegTestCase {
         assertRows(query("sum(tx) or vector(0)") + " | KEEP result", List.of(List.of(35.0)));
         assertRows(query("sum(tx{host=\"missing\"}) or vector(0)") + " | KEEP result", List.of(List.of(0.0)));
         assertRows(query("(max(sum by (cluster)(tx))) or vector(0)") + " | KEEP result", List.of(List.of(20.0)));
-        // csv-spec set_operator_union_vector_zero_fallback: empty by-grouped left + vector(0) → one labelless 0
+        // csv-spec set_operator_union_vector_zero_fallback: empty by-grouped left + vector(0) -> one labelless 0
         assertRows(
             query("max by (cluster) (tx{cluster=\"does_not_exist\"}) or vector(0)") + " | KEEP result, cluster",
             List.of(Arrays.asList(0.0, null))

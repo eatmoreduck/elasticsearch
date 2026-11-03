@@ -1368,7 +1368,7 @@ result:double | step:datetime
 ;
 
 // label_replace over opaque group_left: keep includes (region) and derive dst from pod. Rest must retain child unset
-// (not collapse to {dst} only — that produced Prometheus label-name mismatches) and still carry cluster/pod.
+// (not collapse to {dst} only - that produced Prometheus label-name mismatches) and still carry cluster/pod.
 vector_match_label_replace_over_opaque_group_left
 required_capability: promql_command_v0
 required_capability: promql_vector_matching_v0
@@ -1417,7 +1417,7 @@ result:double
 0.0006993006993006993
 ;
 
-// scalar() of a labelless aggregate × labeled vector: independent step-broadcast (sum(tx)=4248 at 00:10).
+// scalar() of a labelless aggregate x labeled vector: independent step-broadcast (sum(tx)=4248 at 00:10).
 binary_independent_scalar_times_by_cluster
 required_capability: promql_command_v0
 required_capability: promql_vector_matching_v0
@@ -1434,7 +1434,7 @@ result:double | cluster:keyword
 5756040.0     | staging
 ;
 
-// Opaque topk × raw selector (default match): joins under typed _timeseries. Labels stay in _timeseries.
+// Opaque topk x raw selector (default match): joins under typed _timeseries. Labels stay in _timeseries.
 binary_independent_opaque_topk_times_raw
 required_capability: promql_command_v0
 required_capability: promql_vector_matching_v0
@@ -1449,7 +1449,7 @@ result:double | _timeseries:_timeseries
 179960.0      | "{""cluster"":""prod"",""pod"":""one"",""region"":[""eu"",""us""]}"
 ;
 
-// Composed default-match: (by/on by) + opaque raw. Label sets differ ({cluster} vs full), so empty — must plan/run, not reject.
+// Composed default-match: (by/on by) + opaque raw. Label sets differ ({cluster} vs full), so empty - must plan/run, not reject.
 binary_composed_match_plus_opaque
 required_capability: promql_command_v0
 required_capability: promql_vector_matching_v0

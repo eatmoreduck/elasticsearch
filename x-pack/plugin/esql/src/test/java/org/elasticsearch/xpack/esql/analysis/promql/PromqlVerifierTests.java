@@ -600,7 +600,7 @@ public class PromqlVerifierTests extends ESTestCase {
 
     /**
      * Source-backed binaries that cannot share a fold frame join independent pipelines when a shared fold frame is impossible
-     * ({@link EsqlCapabilities.Cap#PROMQL_BINARY_INDEPENDENT_JOIN}). {@code scalar()}×labeled step-broadcasts.
+     * ({@link EsqlCapabilities.Cap#PROMQL_BINARY_INDEPENDENT_JOIN}). {@code scalar()} x labeled step-broadcasts.
      * Opaque reductions need typed {@code _timeseries} (see {@link #testOpaqueReductionBinaryJoinsWithTypedMetadata}).
      */
     public void testUnmatchedAsymmetricOperandsJoin() {
@@ -760,7 +760,7 @@ public class PromqlVerifierTests extends ESTestCase {
     }
 
     /**
-     * Native histograms carry buckets in the value, so {@code without} does not force an {@code le} regroup — the open
+     * Native histograms carry buckets in the value, so {@code without} does not force an {@code le} regroup - the open
      * schema model helps here once the verifier gate is gone.
      */
     public void testNativeHistogramOverWithoutIsAccepted() {
@@ -1053,7 +1053,7 @@ public class PromqlVerifierTests extends ESTestCase {
         assertTrue(
             tsdb.query("PROMQL index=test step=5m label_replace(network.bytes_in, \"dst\", \"$1\", \"host\", \"(.+)\") + 1").resolved()
         );
-        // Vector × vector: label_replace collapses first; the other operand must collapse too (not embed LastOverTime in Eval).
+        // Vector x vector: label_replace collapses first; the other operand must collapse too (not embed LastOverTime in Eval).
         assertTrue(
             tsdb.query("PROMQL index=test step=5m label_replace(network.bytes_in, \"dst\", \"$1\", \"host\", \"(.+)\") + network.bytes_in")
                 .resolved()

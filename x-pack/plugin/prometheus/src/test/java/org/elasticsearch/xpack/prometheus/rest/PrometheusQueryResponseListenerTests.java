@@ -223,7 +223,7 @@ public class PrometheusQueryResponseListenerTests extends ESTestCase {
         assertMetric(rows, columns, Map.of("__name__", "a", "job", "api"));
     }
 
-    /** Sole _timeseries$… column is still the series blob. */
+    /** Sole _timeseries$... column is still the series blob. */
     public void testConvertUsesNameSuffixedTimeseriesAsSeriesCol() throws IOException {
         List<ColumnInfoImpl> columns = List.of(col("value", "double"), col("_timeseries$__name__", "keyword"), col("step", "long"));
         List<List<Object>> rows = List.of(
@@ -310,7 +310,7 @@ public class PrometheusQueryResponseListenerTests extends ESTestCase {
         }
     }
 
-    /** Empty overlay must delete the blob key — otherwise emptied destinations linger. */
+    /** Empty overlay must delete the blob key - otherwise emptied destinations linger. */
     public void testConvertOverlayRemovesBlobLabelWhenConcreteEmpty() throws IOException {
         List<ColumnInfoImpl> columns = List.of(
             col("value", "double"),

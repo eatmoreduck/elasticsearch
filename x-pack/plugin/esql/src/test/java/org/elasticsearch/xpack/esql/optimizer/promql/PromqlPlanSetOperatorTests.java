@@ -181,7 +181,7 @@ public class PromqlPlanSetOperatorTests extends AbstractPromqlPlanOptimizerTests
         assertUnionDedupShape(plan, 2);
     }
 
-    /** Nested under division — the Grafana istio empty-denominator idiom. */
+    /** Nested under division - the Grafana istio empty-denominator idiom. */
     public void testOrOnEmptyNestedUnderDivision() {
         LogicalPlan plan = planPromql(
             "PROMQL index=k8s step=1m sum(rate(network.total_bytes_in[5m])) "

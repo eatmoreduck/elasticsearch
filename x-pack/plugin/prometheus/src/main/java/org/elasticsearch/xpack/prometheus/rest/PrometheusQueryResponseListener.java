@@ -277,7 +277,7 @@ class PrometheusQueryResponseListener implements ActionListener<EsqlQueryRespons
         return false;
     }
 
-    /** First _timeseries / _timeseries$… column, or -1 if concrete-only. */
+    /** First _timeseries / _timeseries$... column, or -1 if concrete-only. */
     private static int findTimeseriesColumn(List<ColumnInfoImpl> columns, int stepColIdx) {
         for (int i = DIMENSION_COL_START_IDX; i < stepColIdx; i++) {
             if (isTimeseriesColumn(columns.get(i).name())) {
@@ -425,7 +425,7 @@ class PrometheusQueryResponseListener implements ActionListener<EsqlQueryRespons
         return columnName != null && columnName.startsWith("labels.") ? columnName.substring("labels.".length()) : columnName;
     }
 
-    /** _timeseries or a PathTrace-suffixed metadata blob — not a Prometheus label. */
+    /** _timeseries or a PathTrace-suffixed metadata blob - not a Prometheus label. */
     static boolean isTimeseriesColumn(String name) {
         return name != null && (name.equals(MetadataAttribute.TIMESERIES) || name.startsWith(MetadataAttribute.TIMESERIES + "$"));
     }

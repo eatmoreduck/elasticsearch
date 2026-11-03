@@ -390,7 +390,7 @@ result:double | dst:keyword
 ;
 
 
-// Vector×vector: two identical relabels join on the shared derived label set (not fold LastOverTime into Eval).
+// Vector x vector: two identical relabels join on the shared derived label set (not fold LastOverTime into Eval).
 label_replace_plus_identical_relabel
 required_capability: promql_command_v0
 required_capability: fix_promql_time_bucket_v2

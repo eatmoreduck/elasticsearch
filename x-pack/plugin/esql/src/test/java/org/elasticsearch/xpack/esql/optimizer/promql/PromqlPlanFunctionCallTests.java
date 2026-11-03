@@ -571,7 +571,7 @@ public class PromqlPlanFunctionCallTests extends AbstractPromqlPlanOptimizerTest
 
     /**
      * {@code label_replace} over an opaque {@code group_left} must keep the child's rest unset (includes already left out
-     * of rest) and add the destination — replacing rest with {@code {dst}} alone used to drop Prometheus labels from the
+     * of rest) and add the destination - replacing rest with {@code {dst}} alone used to drop Prometheus labels from the
      * result (label-name mismatch vs control).
      */
     public void testLabelReplaceOverGroupLeftPreservesRestUnset() {
