@@ -6,14 +6,14 @@ ProjectExec[[parts.domain{r}#0, parts.fragment{r}#1, parts.path{r}#2, parts.exte
         \_EvalExec[[TODOUBLE(oYJdEiiJ{r}#13) AS oYJdEiiJ#12]]
           \_FilterExec[step{r}#14 >= 0[DATETIME] AND step{r}#14 <= 253402300799999[DATETIME]]
             \_UnpackDimsExec[_$packed_grouping_dims{r}#15,[_timeseries{r}#11]]
-              \_AggregateExec[[step{r}#14, _$packed_dims{r}#16],[VALUES(LASTOVERTIME_$1{r}#17,true[BOOLEAN],PT0S[TIME_DURATION]) AS oYJdEiiJ#13, step{r}#14 AS step#14, _$packed_dims{r}#16 AS _$packed_grouping_dims#15],SINGLE,[step{r}#14, _$packed_dims{r}#16, $$oYJdEiiJ$values{r}#18],null]
-                \_TimeSeriesAggregateExec[[_tsid{m}#19, step{r}#14],[LASTOVERTIME(network.bytes_in{f}#20,@timestamp{f}#21,true[BOOLEAN],PT0S[TIME_DURATION]) AS LASTOVERTIME_$1#17, PACKDIMSAGG(_timeseries{f}#11,true[BOOLEAN],PT0S[TIME_DURATION]) AS _$packed_dims#16, step{r}#14],FINAL,[_tsid{m}#19, step{r}#14, $$LASTOVERTIME_$1$timestamps{r}#22, $$LASTOVERTIME_$2$values{r}#23, $$_$packed_dims$values{r}#24],null,BUCKET(@timestamp{f}#21,PT1H[TIME_DURATION])]
-                  \_ExchangeExec[[_tsid{m}#19, step{r}#14, $$LASTOVERTIME_$1$timestamps{r}#22, $$LASTOVERTIME_$2$values{r}#23, $$_$packed_dims$values{r}#24],true]
-                    \_ProjectExec[[_tsid{m}#19, step{r}#14, $$LASTOVERTIME_$1$timestamps{r}#25, $$LASTOVERTIME_$2$values{r}#26, $$_$packed_dims$values{r}#27]]
+              \_AggregateExec[[step{r}#14, _tsid{m}#16, _$packed_dims{r}#17],[VALUES(LASTOVERTIME_$1{r}#18,true[BOOLEAN],PT0S[TIME_DURATION]) AS oYJdEiiJ#13, step{r}#14 AS step#14, _$packed_dims{r}#17 AS _$packed_grouping_dims#15],SINGLE,[step{r}#14, _tsid{m}#16, _$packed_dims{r}#17, $$oYJdEiiJ$values{r}#19],null]
+                \_TimeSeriesAggregateExec[[_tsid{m}#16, step{r}#14],[LASTOVERTIME(network.bytes_in{f}#20,@timestamp{f}#21,true[BOOLEAN],PT0S[TIME_DURATION]) AS LASTOVERTIME_$1#18, PACKDIMSAGG(_timeseries{f}#11,true[BOOLEAN],PT0S[TIME_DURATION]) AS _$packed_dims#17, _tsid{m}#16, step{r}#14],FINAL,[_tsid{m}#16, step{r}#14, $$LASTOVERTIME_$1$timestamps{r}#22, $$LASTOVERTIME_$2$values{r}#23, $$_$packed_dims$values{r}#24],null,BUCKET(@timestamp{f}#21,PT1H[TIME_DURATION])]
+                  \_ExchangeExec[[_tsid{m}#16, step{r}#14, $$LASTOVERTIME_$1$timestamps{r}#22, $$LASTOVERTIME_$2$values{r}#23, $$_$packed_dims$values{r}#24],true]
+                    \_ProjectExec[[_tsid{m}#16, step{r}#14, $$LASTOVERTIME_$1$timestamps{r}#25, $$LASTOVERTIME_$2$values{r}#26, $$_$packed_dims$values{r}#27]]
                       \_PackDimsExec[[_timeseries{f$}#28],$$_$packed_dims$values{r}#27]
-                        \_ReadDimsExec[_timeseries{f$}#28]<tsid=_tsid{m}#19>
-                          \_TimeSeriesAggregateExec[[_tsid{m}#19, step{r}#14],[LASTOVERTIME(network.bytes_in{f}#20,@timestamp{f}#21,true[BOOLEAN],PT0S[TIME_DURATION]) AS LASTOVERTIME_$1#17, step{r}#14, FIRSTDOCID(_doc{f}#29,true[BOOLEAN],PT0S[TIME_DURATION]) AS _doc#30],INITIAL,[_tsid{m}#19, step{r}#14, $$LASTOVERTIME_$1$timestamps{r}#25, $$LASTOVERTIME_$2$values{r}#26, _doc{r}#31],1060,BUCKET(@timestamp{f}#21,PT1H[TIME_DURATION])]
-                            \_FieldExtractExec[[_tsid{m}#19, network.bytes_in{f}#20]<[],[],[]>,_doc{f}#29]
+                        \_ReadDimsExec[_timeseries{f$}#28]<tsid=_tsid{m}#16>
+                          \_TimeSeriesAggregateExec[[_tsid{m}#16, step{r}#14],[LASTOVERTIME(network.bytes_in{f}#20,@timestamp{f}#21,true[BOOLEAN],PT0S[TIME_DURATION]) AS LASTOVERTIME_$1#18, _tsid{m}#16, step{r}#14, FIRSTDOCID(_doc{f}#29,true[BOOLEAN],PT0S[TIME_DURATION]) AS _doc#30],INITIAL,[_tsid{m}#16, step{r}#14, $$LASTOVERTIME_$1$timestamps{r}#25, $$LASTOVERTIME_$2$values{r}#26, _doc{r}#31],1076,BUCKET(@timestamp{f}#21,PT1H[TIME_DURATION])]
+                            \_FieldExtractExec[[_tsid{m}#16, network.bytes_in{f}#20]<[],[],[]>,_doc{f}#29]
                               \_EvalExec[[BUCKET(@timestamp{f}#21,PT1H[TIME_DURATION]) AS step#14]]
                                 \_FieldExtractExec[[@timestamp{f}#21]<[],[],[]>,_doc{f}#29]
                                   \_EsQueryExec[k8s-downsampled], indexMode[standard], [_doc{f}#29], limit[], sort[] estimatedRowSize[44] queryBuilderAndTags [[QueryBuilderAndTags[query={
