@@ -417,6 +417,22 @@ public class FunctionalTimeSeriesIT extends AbstractEsqlIntegTestCase {
         );
     }
 
+    /**
+     * A filter comparison against a scalar computed from the source keeps the vector's value, whichever side the scalar is
+     * on, as Prometheus does; with bool it keeps every series with 0 or 1.
+     */
+    public void testComparisonWithComputedScalarKeepsTheVectorValue() {
+        createMetricsIndex(INDEX);
+        index(INDEX, "cluster", "prod", "host", "a", "tx", 1.0);
+        index(INDEX, "cluster", "prod", "host", "b", "tx", 3.0);
+        refresh(INDEX);
+        String hostB = "{\"cluster\":\"prod\",\"host\":\"b\"}";
+
+        assertRows(query("tx > scalar(avg(tx))") + " | KEEP result, _timeseries", List.of(List.of(3.0, hostB)));
+        assertRows(query("scalar(avg(tx)) < tx") + " | KEEP result, _timeseries", List.of(List.of(3.0, hostB)));
+        assertRows(query("tx > bool scalar(avg(tx))") + " | KEEP result", List.of(List.of(0.0), List.of(1.0)));
+    }
+
     /** Reject result names that collide with labels/metadata before the plan consistency checker. */
     public void testResultNameMustNotShadowLabelsOrMetadata() {
         createMetricsIndex(INDEX);

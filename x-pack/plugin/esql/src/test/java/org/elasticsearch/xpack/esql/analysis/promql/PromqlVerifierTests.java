@@ -590,12 +590,12 @@ public class PromqlVerifierTests extends ESTestCase {
 
     public void testVectorVectorComparisonIsSupported() {
         assumeTrue("PromQL vector matching is required", EsqlCapabilities.Cap.PROMQL_VECTOR_MATCHING_V0.isEnabled());
-        // Two instant vectors compare via a join (filter mode keeps the left series); a non-literal scalar RHS is still rejected.
+        // Two instant vectors compare via a join (filter mode keeps the left series).
         assertNotNull(tsdb.query("PROMQL index=test step=5m network.bytes_in > network.connections"));
-        tsdb.error(
-            "PROMQL index=test step=5m network.bytes_in > scalar(network.connections)",
-            containsString("comparison operators with non-literal right-hand side are not supported at this time")
-        );
+        // A scalar computed from the source broadcasts on step, on either metadata representation.
+        String computedScalar = "PROMQL index=test step=5m network.bytes_in > scalar(network.connections)";
+        assertTrue(keywordTsdb.query(computedScalar).resolved());
+        assertTrue(tsdb.query(computedScalar).resolved());
     }
 
     /**
