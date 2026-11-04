@@ -514,6 +514,28 @@ public class FunctionalTimeSeriesIT extends AbstractEsqlIntegTestCase {
         );
     }
 
+    /**
+     * group_left copies the one side's labels over the many side's: two many side series left with the same labels fail
+     * the query, as in Prometheus, rather than come back as two series with one label set.
+     */
+    public void testGroupLeftLabelCollisionFails() {
+        createMetricsIndex(INDEX);
+        index(INDEX, "cluster", "prod", "host", "a", "region", "east", "tx", 1.0);
+        index(INDEX, "cluster", "prod", "host", "b", "region", "east", "tx", 3.0);
+        refresh(INDEX);
+        // The one side has no host, so both series lose theirs.
+        var error = expectThrows(Exception.class, () -> run(query("tx * on(cluster) group_left(host) sum by (cluster) (tx)")));
+        assertThat(error.getMessage(), containsString("input must not have duplicates"));
+        // Prometheus matches before it compares: a comparison no series passes fails too.
+        var filtered = expectThrows(Exception.class, () -> run(query("tx > on(cluster) group_left(host) (sum by (cluster) (tx) * 100)")));
+        assertThat(filtered.getMessage(), containsString("input must not have duplicates"));
+        // Copying a label the series agree on keeps them apart.
+        assertRows(
+            query("tx * on(cluster) group_left(region) sum by (cluster, region) (tx)") + " | KEEP result, region | SORT result",
+            List.of(List.of(4.0, "east"), List.of(12.0, "east"))
+        );
+    }
+
     /** or on(__name__, ...) keeps a right series that differs from a left one only in its name, also inside a default or. */
     public void testOrOnMetricNameKeepsSeriesApartByName() {
         createMetricsIndexWithRx(INDEX);
