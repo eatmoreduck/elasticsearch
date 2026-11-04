@@ -73,24 +73,6 @@ public final class VectorBinarySet extends VectorBinaryOperator {
         }
     }
 
-    /** Unmodified unless can fold (right IS NULL); cross-metric empty-right needs LEFT hash join instead. */
-    @Override
-    protected boolean requiresIndependentPipelines() {
-        if (op == SetOp.SUBTRACT && match().filter() == VectorMatch.Filter.NONE && match().grouping() == Joining.NONE) {
-            return false;
-        }
-        return super.requiresIndependentPipelines();
-    }
-
-    /**
-     * Fold would empty the left when operands never share groups; verifier rejects until join covers it.
-     */
-    public boolean subtractOperandsNeverShareGroups() {
-        return op == SetOp.SUBTRACT
-            && match() == VectorMatch.NONE
-            && (hasMismatchedLabelSets() || aggregatesAcrossSeries(left()) != aggregatesAcrossSeries(right()));
-    }
-
     private final SetOp op;
 
     public VectorBinarySet(Source source, LogicalPlan left, LogicalPlan right, VectorMatch match, SetOp op) {

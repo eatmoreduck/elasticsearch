@@ -40,13 +40,10 @@ import org.elasticsearch.xpack.esql.plan.logical.UnionAll;
 import org.elasticsearch.xpack.esql.plan.logical.join.HashJoin;
 import org.elasticsearch.xpack.esql.plan.logical.join.JoinType;
 import org.elasticsearch.xpack.esql.plan.logical.join.JoinTypes;
-import org.elasticsearch.xpack.esql.plan.logical.promql.AcrossSeriesAggregate;
-import org.elasticsearch.xpack.esql.plan.logical.promql.AcrossSeriesReduction;
 import org.elasticsearch.xpack.esql.plan.logical.promql.PromqlCommand;
 import org.elasticsearch.xpack.esql.plan.logical.promql.PromqlDataType;
 import org.elasticsearch.xpack.esql.plan.logical.promql.PromqlLabels;
 import org.elasticsearch.xpack.esql.plan.logical.promql.PromqlPlan;
-import org.elasticsearch.xpack.esql.plan.logical.promql.ScalarConversionFunction;
 import org.elasticsearch.xpack.esql.plan.logical.promql.TranslationContext;
 import org.elasticsearch.xpack.esql.plan.logical.promql.TranslationContext.IntermediateResult;
 import org.elasticsearch.xpack.esql.plan.logical.promql.TranslationContext.IntermediateResult.Kind;
@@ -396,12 +393,6 @@ public abstract sealed class VectorBinaryOperator extends BinaryPlan implements 
 
     private static boolean hasSourceBackedExpression(LogicalPlan plan) {
         return plan.anyMatch(p -> p instanceof Selector && (p instanceof LiteralSelector) == false);
-    }
-
-    protected static boolean aggregatesAcrossSeries(LogicalPlan plan) {
-        return plan.anyMatch(
-            p -> p instanceof AcrossSeriesAggregate || p instanceof AcrossSeriesReduction || p instanceof ScalarConversionFunction
-        );
     }
 
     /**

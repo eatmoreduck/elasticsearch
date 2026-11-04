@@ -458,6 +458,22 @@ public class FunctionalTimeSeriesIT extends AbstractEsqlIntegTestCase {
         assertRows(query("tx unless ignoring(host) (tx > 2)") + " | KEEP result, _timeseries", List.of());
     }
 
+    /** unless between operands whose series never share a group keeps the left operand whole, as in Prometheus. */
+    public void testUnlessAcrossLabelSets() {
+        createMetricsIndex(INDEX);
+        index(INDEX, "cluster", "prod", "host", "a", "region", "east", "tx", 1.0);
+        index(INDEX, "cluster", "prod", "host", "b", "region", "east", "tx", 3.0);
+        index(INDEX, "cluster", "prod", "host", "c", "region", "west", "tx", 5.0);
+        refresh(INDEX);
+
+        assertRows(
+            query("sum by (host) (tx) unless sum by (region) (tx)") + " | KEEP result, host",
+            List.of(List.of(1.0, "a"), List.of(3.0, "b"), List.of(5.0, "c"))
+        );
+        assertRows(query("sum(tx) unless tx") + " | KEEP result", List.of(List.of(9.0)));
+        assertRows(query("sum by (region) (tx) unless sum by (region) (tx > 4)") + " | KEEP result, region", List.of(List.of(4.0, "east")));
+    }
+
     /** Reject result names that collide with labels/metadata before the plan consistency checker. */
     public void testResultNameMustNotShadowLabelsOrMetadata() {
         createMetricsIndex(INDEX);

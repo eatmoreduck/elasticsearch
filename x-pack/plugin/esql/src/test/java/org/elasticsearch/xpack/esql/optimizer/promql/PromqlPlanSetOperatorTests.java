@@ -17,6 +17,7 @@ import org.elasticsearch.xpack.esql.plan.logical.LogicalPlan;
 import org.elasticsearch.xpack.esql.plan.logical.TopNBy;
 import org.elasticsearch.xpack.esql.plan.logical.UnionAll;
 import org.elasticsearch.xpack.esql.plan.logical.join.HashJoin;
+import org.elasticsearch.xpack.esql.plan.logical.join.JoinTypes;
 
 import java.util.List;
 
@@ -169,6 +170,21 @@ public class PromqlPlanSetOperatorTests extends AbstractPromqlPlanOptimizerTests
         assertThat(dedup, hasSize(1));
         assertThat(dedup.getFirst().limitPerGroup().fold(FoldContext.small()), equalTo(1));
         assertThat(dedup.getFirst().groupings(), hasSize(join.rightFields().size()));
+    }
+
+    /**
+     * {@code unless} between operands whose series never share a group cannot fold into one aggregate, which would come
+     * back empty: it anti-joins (LEFT) on the union of the operands' labels, so the left operand is kept whole.
+     */
+    public void testUnlessBetweenDifferentLabelSetsAntiJoins() {
+        LogicalPlan plan = planPromql(
+            "PROMQL index=k8s step=1m sum by (cluster, pod) (network.bytes_in) unless sum by (cluster) (network.cost)",
+            false
+        );
+        assertTrue(plan.resolved());
+        List<HashJoin> joins = plan.collect(HashJoin.class);
+        assertThat(joins, hasSize(1));
+        assertThat(joins.getFirst().config().type(), equalTo(JoinTypes.LEFT));
     }
 
     /**

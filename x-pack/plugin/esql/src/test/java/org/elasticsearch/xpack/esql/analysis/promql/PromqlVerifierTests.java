@@ -266,18 +266,15 @@ public class PromqlVerifierTests extends ESTestCase {
         // unless keeps left series with no match on the right (default matching).
         assertNotNull(tsdb.query("PROMQL index=test step=5m network.bytes_in unless network.connections"));
         assertNotNull(tsdb.query("PROMQL index=test step=5m sum by (host) (network.bytes_in) unless sum by (host) (network.connections)"));
-        // unless folds both operands into one aggregate; operands whose series can never share a group would come back
-        // empty where Prometheus keeps the whole left operand, so they are rejected until an anti-join exists.
+        // Operands whose series can never share a group anti-join: the left operand comes back whole, as in Prometheus.
         for (String query : List.of(
             "sum by (host, metricset) (network.bytes_in) unless sum by (host) (network.connections)",
-            "network.bytes_in unless sum by (host) (network.connections)",
             "sum by (host) (network.bytes_in) unless network.connections"
         )) {
-            tsdb.error(
-                "PROMQL index=test step=5m " + query,
-                containsString("set operator [unless] between operands with different label sets is not supported at this time")
-            );
+            assertTrue(query, tsdb.query("PROMQL index=test step=5m " + query).resolved());
+            assertTrue(query, keywordTsdb.query("PROMQL index=test step=5m " + query).resolved());
         }
+        assertNeedsTypedMetadata("network.bytes_in unless sum by (host) (network.connections)");
         List.of("and", "unless").forEach(op -> {
             // Any scalar operand is illegal in PromQL itself.
             tsdb.error(
@@ -314,6 +311,20 @@ public class PromqlVerifierTests extends ESTestCase {
         tsdb.error(
             "PROMQL index=test step=5m sum(network.bytes_in) or on (host) vector(1)",
             containsString("set operator [or] with on/ignoring is not supported at this time")
+        );
+    }
+
+    /**
+     * Resolves {@code query} under typed metadata. Keyword metadata rejects it: matching leaves labels out of an opaque
+     * operand's metadata.
+     */
+    private void assertNeedsTypedMetadata(String query) {
+        if (EsqlCapabilities.Cap.PROMQL_ENABLE_TIMESERIES_TYPE.isEnabled()) {
+            assertTrue(query, tsdb.query("PROMQL index=test step=5m " + query).resolved());
+        }
+        keywordTsdb.error(
+            "PROMQL index=test step=5m " + query,
+            containsString("leaving labels out of _timeseries requires typed time-series metadata")
         );
     }
 

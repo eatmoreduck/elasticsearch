@@ -1119,16 +1119,6 @@ public class PromqlCommand extends UnaryPlan implements TelemetryAware, Timestam
             return;
         }
         if (setOp.op() == VectorBinarySet.SetOp.SUBTRACT) {
-            if (setOp.subtractOperandsNeverShareGroups()) {
-                // The fold would return the empty vector where Prometheus keeps the whole left operand.
-                failures.add(
-                    fail(
-                        setOp,
-                        "set operator [unless] between operands with different label sets is not supported at this time [{}]",
-                        setOp.sourceText()
-                    )
-                );
-            }
             return;
         }
         if (setOp.match() != VectorMatch.NONE && VectorBinarySet.isLabellessOrOnEmpty(setOp) == false) {
