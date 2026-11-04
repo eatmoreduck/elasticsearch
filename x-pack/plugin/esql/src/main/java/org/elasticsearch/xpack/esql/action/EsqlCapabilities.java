@@ -2783,6 +2783,12 @@ public class EsqlCapabilities {
         FIX_PROMQL_SCALAR_COMPARISON,
 
         /**
+         * PromQL {@code or} with {@code on(...)}/{@code ignoring(...)} keeps the right series no left series matches on the
+         * listed labels, and {@code unless} between operands with different label sets keeps the left operand whole.
+         */
+        PROMQL_SET_OPERATOR_MATCHING,
+
+        /**
          * PromQL label matchers that accept the empty string (e.g. {@code {label=""}} or {@code {label!="foo"}})
          * also match time series where the label is absent ({@code NULL}), per PromQL spec.
          */
