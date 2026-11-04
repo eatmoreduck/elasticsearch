@@ -51,7 +51,6 @@ import org.elasticsearch.xpack.esql.plan.logical.promql.operator.VectorBinaryCom
 import org.elasticsearch.xpack.esql.plan.logical.promql.operator.VectorBinaryOperator;
 import org.elasticsearch.xpack.esql.plan.logical.promql.operator.VectorBinarySet;
 import org.elasticsearch.xpack.esql.plan.logical.promql.operator.VectorMatch;
-import org.elasticsearch.xpack.esql.plan.logical.promql.selector.LabelMatcher;
 import org.elasticsearch.xpack.esql.plan.logical.promql.selector.LiteralSelector;
 import org.elasticsearch.xpack.esql.plan.logical.promql.selector.RangeSelector;
 import org.elasticsearch.xpack.esql.plan.logical.promql.selector.Selector;
@@ -513,8 +512,8 @@ public class PromqlCommand extends UnaryPlan implements TelemetryAware, Timestam
     public LogicalPlan translate(AnalyzerContext analyzer) {
         var context = new TranslationContext(this, analyzer);
         LogicalPlan plan = promqlPlan();
-        // Set operators with matching modifiers translate themselves (e.g. {@code or on ()}); arithmetic/comparison
-        // operators with {@code on}/{@code ignoring}/{@code group_*} use the join path below.
+        // Set operators with matching modifiers translate themselves; arithmetic/comparison operators with
+        // {@code on}/{@code ignoring}/{@code group_*} use the join path below.
         if (plan instanceof VectorBinaryOperator op && (plan instanceof VectorBinarySet) == false) {
             VectorMatch match = op.match();
             if (match.filter() != VectorMatch.Filter.NONE || match.grouping() != VectorMatch.Joining.NONE) {
@@ -1097,18 +1096,16 @@ public class PromqlCommand extends UnaryPlan implements TelemetryAware, Timestam
     }
 
     /**
-     * Set operators ({@code and}/{@code or}/{@code unless}) are supported with one exception, {@code or on(__name__)}.
+     * Set operators ({@code and}/{@code or}/{@code unless}) are supported except {@code or} with {@code on}/{@code ignoring}.
      * <ul>
      *   <li>Scalar operands are illegal for set operators in PromQL itself; we mirror Prometheus' wording.</li>
      *   <li>{@code and} (INTERSECT) keeps left series that match on the right (default or {@code on}/{@code ignoring}).</li>
      *   <li>{@code unless} (SUBTRACT) keeps left series with no match on the right, by default matching or by
      *       {@code on}/{@code ignoring}. Operands whose label sets never match anti-join too, so the left operand comes
      *       back whole, as in Prometheus.</li>
-     *   <li>{@code or} (UNION) without {@code on}/{@code ignoring}, or as the empty-guard idiom
-     *       {@code <labelless> or on () <labelless>}, unions its branches by default matching. Any other
-     *       {@code a or on(K) b} plans as {@code a or (b unless on(K) a)}. That union matches by default, which ignores the
-     *       metric name, so it would drop a right series that differs from a left one only in its name: {@code on(__name__)}
-     *       is rejected.</li>
+     *   <li>{@code or} (UNION) without {@code on}/{@code ignoring} unions its branches by default matching, keeping one
+     *       series per step and label set without {@code __name__}. With {@code on}/{@code ignoring} several series of an
+     *       operand share a match signature and all of them stay, which needs a top-1 per signature that keeps its ties.</li>
      * </ul>
      * Matching that leaves labels out of an opaque operand's metadata ({@code ignoring}, or default matching against a
      * narrower label set) needs typed {@code _timeseries}; keyword metadata rejects it when the label refs are pruned.
@@ -1124,10 +1121,11 @@ public class PromqlCommand extends UnaryPlan implements TelemetryAware, Timestam
         if (setOp.op() == VectorBinarySet.SetOp.SUBTRACT) {
             return;
         }
-        if (setOp.match().filter() == VectorMatch.Filter.ON && setOp.match().filterLabels().contains(LabelMatcher.NAME)) {
-            // An on/ignoring union keeps the right series its left one does not match, then unions the two by default
-            // matching, which ignores the metric name: a series that differs from a left one only in its name would go.
-            failures.add(fail(setOp, "set operator [or] with on(__name__) is not supported at this time [{}]", setOp.sourceText()));
+        if (setOp.match() != VectorMatch.NONE) {
+            // TODO: Support or with on/ignoring by unioning on each operator's match signature once TopNBy keeps ties.
+            // https://github.com/elastic/elasticsearch/issues/158181
+            // https://github.com/elastic/elasticsearch/pull/164632
+            failures.add(fail(setOp, "set operator [or] with on/ignoring is not supported at this time [{}]", setOp.sourceText()));
         }
     }
 

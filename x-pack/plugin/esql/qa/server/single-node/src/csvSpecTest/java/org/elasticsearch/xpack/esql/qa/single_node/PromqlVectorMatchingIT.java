@@ -9,6 +9,8 @@ package org.elasticsearch.xpack.esql.qa.single_node;
 
 import com.carrotsearch.randomizedtesting.annotations.ThreadLeakFilters;
 
+import org.apache.http.util.EntityUtils;
+import org.elasticsearch.client.ResponseException;
 import org.elasticsearch.test.TestClustersThreadFilter;
 import org.elasticsearch.test.cluster.ElasticsearchCluster;
 import org.elasticsearch.xpack.esql.CsvTestUtils;
@@ -22,12 +24,9 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
-import java.util.stream.Collectors;
 
+import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.equalTo;
-import static org.hamcrest.Matchers.greaterThan;
-import static org.hamcrest.Matchers.hasItem;
 
 /** REST coverage for PromQL vector matching. */
 @ThreadLeakFilters(filters = TestClustersThreadFilter.class)
@@ -179,44 +178,12 @@ public class PromqlVectorMatchingIT extends RestEsqlTestCase {
         );
     }
 
-    /**
-     * {@code or on(cluster)} keeps every left series and adds the right series of the clusters the left one lacks: the same
-     * rows as a default {@code or} whose right operand leaves out the left one's clusters.
-     */
-    public void testOrWithOnKeepsUnmatchedRightSeries() throws IOException {
+    public void testOrWithOnIsRejected() throws IOException {
         requirePromqlUnion();
-        assumeTrue(
-            "PromQL set operator matching is required",
-            hasCapabilities(adminClient(), List.of(EsqlCapabilities.Cap.PROMQL_SET_OPERATOR_MATCHING.capabilityName()))
+        assertPromqlError(
+            "PROMQL index=k8s step=10m " + "sum by (cluster) (network.eth0.tx) or on (cluster) sum by (cluster) (network.eth0.rx)",
+            "set operator [or] with on/ignoring is not supported at this time"
         );
-        String keep = " | KEEP result, cluster, step | SORT cluster, step";
-        List<List<Object>> matched = values(
-            "PROMQL index=k8s step=10m result=(sum by (cluster) (network.eth0.tx{cluster=\"prod\"}) "
-                + "or on (cluster) sum by (cluster) (network.eth0.rx))"
-                + keep
-        );
-        List<List<Object>> disjoint = values(
-            "PROMQL index=k8s step=10m result=(sum by (cluster) (network.eth0.tx{cluster=\"prod\"}) "
-                + "or sum by (cluster) (network.eth0.rx{cluster!=\"prod\"}))"
-                + keep
-        );
-        assertThat(matched, equalTo(disjoint));
-        Set<Object> clusters = matched.stream().map(row -> row.get(1)).collect(Collectors.toSet());
-        assertThat(clusters, hasItem("prod"));
-        assertThat(clusters.size(), greaterThan(1));
-    }
-
-    public void testOrOnEmptyVectorFillIsSupported() throws IOException {
-        requirePromqlUnion();
-        // Labelless empty-guard: keep the sum when present, else fill with vector(1). Must plan and execute.
-        Map<String, Object> fill = runEsqlSync(
-            requestObjectBuilder().query("PROMQL index=k8s step=10m sum(network.eth0.tx) or on () vector(1)")
-        );
-        assertNotNull(fill.get("values"));
-        Map<String, Object> ratio = runEsqlSync(
-            requestObjectBuilder().query("PROMQL index=k8s step=10m sum(network.eth0.tx) / (sum(network.eth0.tx) or on () vector(1))")
-        );
-        assertNotNull(ratio.get("values"));
     }
 
     private void requirePromqlUnion() {
@@ -226,14 +193,15 @@ public class PromqlVectorMatchingIT extends RestEsqlTestCase {
         );
     }
 
-    private void assertRows(String query, List<List<Object>> expectedRows) throws IOException {
-        assertThat(values(query), equalTo(expectedRows));
+    private void assertPromqlError(String query, String expectedMessage) throws IOException {
+        ResponseException error = expectThrows(ResponseException.class, () -> runEsqlSync(requestObjectBuilder().query(query)));
+        assertThat(EntityUtils.toString(error.getResponse().getEntity()), containsString(expectedMessage));
     }
 
-    private List<List<Object>> values(String query) throws IOException {
+    private void assertRows(String query, List<List<Object>> expectedRows) throws IOException {
         Map<String, Object> response = runEsqlSync(requestObjectBuilder().query(query));
         @SuppressWarnings("unchecked")
         List<List<Object>> values = (List<List<Object>>) response.get("values");
-        return values;
+        assertThat(values, equalTo(expectedRows));
     }
 }

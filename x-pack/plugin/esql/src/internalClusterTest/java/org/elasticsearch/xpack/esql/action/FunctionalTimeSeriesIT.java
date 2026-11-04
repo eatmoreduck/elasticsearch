@@ -474,30 +474,6 @@ public class FunctionalTimeSeriesIT extends AbstractEsqlIntegTestCase {
         assertRows(query("sum by (region) (tx) unless sum by (region) (tx > 4)") + " | KEEP result, region", List.of(List.of(4.0, "east")));
     }
 
-    /** or with on/ignoring adds the right series that no left series matches on the listed labels, as in Prometheus. */
-    public void testOrWithMatching() {
-        createMetricsIndex(INDEX);
-        index(INDEX, "cluster", "prod", "host", "a", "region", "east", "tx", 1.0);
-        index(INDEX, "cluster", "prod", "host", "b", "region", "east", "tx", 3.0);
-        index(INDEX, "cluster", "prod", "host", "c", "region", "west", "tx", 5.0);
-        refresh(INDEX);
-        String a = "{\"cluster\":\"prod\",\"host\":\"a\",\"region\":\"east\"}";
-        String b = "{\"cluster\":\"prod\",\"host\":\"b\",\"region\":\"east\"}";
-        String c = "{\"cluster\":\"prod\",\"host\":\"c\",\"region\":\"west\"}";
-
-        assertRows(
-            query("tx{region=\"east\"} or on(region) tx{region=\"west\"}") + " | KEEP result, _timeseries",
-            List.of(List.of(1.0, a), List.of(3.0, b), List.of(5.0, c))
-        );
-        assertRows(query("tx{host=\"a\"} or on(region) tx") + " | KEEP result, _timeseries", List.of(List.of(1.0, a), List.of(5.0, c)));
-        // b shares cluster and region with a, so only c is added.
-        assertRows(
-            query("tx{host=\"a\"} or ignoring(host) tx{host=~\"b|c\"}") + " | KEEP result, _timeseries",
-            List.of(List.of(1.0, a), List.of(5.0, c))
-        );
-        assertRows(query("tx{host=\"a\"} or ignoring(host, region) tx") + " | KEEP result, _timeseries", List.of(List.of(1.0, a)));
-    }
-
     /** Reject result names that collide with labels/metadata before the plan consistency checker. */
     public void testResultNameMustNotShadowLabelsOrMetadata() {
         createMetricsIndex(INDEX);

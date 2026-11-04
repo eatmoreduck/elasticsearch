@@ -1265,17 +1265,6 @@ public class PromqlPlanBinaryOperatorTests extends AbstractPromqlPlanOptimizerTe
     }
 
     /**
-     * Grafana empty-denominator idiom on a {@code __name__}-dimension index: nested {@code or on ()} keeps a sticky
-     * value name above UnionAll so the outer division's build-side reidentify does not rewrite union branches.
-     */
-    public void testOrOnEmptyUnderDivisionPrometheusLayout() {
-        var plan = planPrometheusLayout("sum(node_memory_MemAvailable_bytes) / (sum(node_memory_MemAvailable_bytes) or on () vector(1))");
-        assertTrue(plan.resolved());
-        assertFalse(plan.collect(UnionAll.class).isEmpty());
-        assertFalse(plan.collect(HashJoin.class).isEmpty());
-    }
-
-    /**
      * {@code TS_COLLAPSE} must group the command's public {@code _timeseries} column. Using the inner plan's unresolved
      * rest (refined to drop {@code __name__}) would PathTrace-rename it to {@code _timeseries$__name__} and leave the
      * projected {@code _timeseries} channel uncovered at runtime.
