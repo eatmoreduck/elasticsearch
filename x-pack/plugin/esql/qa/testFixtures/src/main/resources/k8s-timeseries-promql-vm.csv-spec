@@ -1333,35 +1333,12 @@ PROMQL index=k8s step=10m result=(sum by (cluster) (network.eth0.tx) + sum by (p
 result:double | step:datetime | cluster:keyword
 ;
 
-// Labelless sum + ignoring opaque selector: empty Prometheus signature never matches a non-empty series. Must not
-// 400 "found a duplicate row" (unique HashJoin on step alone) or 500 IndexOOB (asymmetric join-key arity).
-vector_match_ignoring_labelless_vs_opaque_is_empty
-required_capability: promql_command_v0
-required_capability: promql_vector_matching_v0
-required_capability: promql_enable_timeseries_type
-PROMQL index=k8s step=10m result=(sum(network.eth0.tx) + ignoring (pod) network.eth0.tx)
-| KEEP result, step;
-
-result:double | step:datetime
-;
-
-// Symmetric reverse of the above (opaque + ignoring labelless).
+// Opaque selector + ignoring labelless sum: the empty Prometheus signature never matches a non-empty series.
 vector_match_ignoring_opaque_vs_labelless_is_empty
 required_capability: promql_command_v0
 required_capability: promql_vector_matching_v0
 required_capability: promql_enable_timeseries_type
 PROMQL index=k8s step=10m result=(network.eth0.tx + ignoring (pod) sum(network.eth0.tx))
-| KEEP result, step;
-
-result:double | step:datetime
-;
-
-// Nested: empty ignoring match under a further group_left stays empty.
-vector_match_nested_ignoring_labelless_under_group_left_is_empty
-required_capability: promql_command_v0
-required_capability: promql_vector_matching_v0
-required_capability: promql_enable_timeseries_type
-PROMQL index=k8s step=10m result=((sum(network.eth0.tx) + ignoring (pod) network.eth0.tx) * on (cluster) group_left network.eth0.rx)
 | KEEP result, step;
 
 result:double | step:datetime

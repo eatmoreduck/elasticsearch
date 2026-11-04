@@ -474,6 +474,61 @@ public class FunctionalTimeSeriesIT extends AbstractEsqlIntegTestCase {
         assertRows(query("sum by (region) (tx) unless sum by (region) (tx > 4)") + " | KEEP result, region", List.of(List.of(4.0, "east")));
     }
 
+    /**
+     * or with on/ignoring keeps every left series, several sharing a match signature included, and adds the right series
+     * no left series matches on the listed labels, as in Prometheus.
+     */
+    public void testOrWithMatching() {
+        createMetricsIndex(INDEX);
+        index(INDEX, "cluster", "prod", "host", "a", "region", "east", "tx", 1.0);
+        index(INDEX, "cluster", "prod", "host", "b", "region", "east", "tx", 3.0);
+        index(INDEX, "cluster", "prod", "host", "c", "region", "west", "tx", 5.0);
+        refresh(INDEX);
+        String a = "{\"cluster\":\"prod\",\"host\":\"a\",\"region\":\"east\"}";
+        String b = "{\"cluster\":\"prod\",\"host\":\"b\",\"region\":\"east\"}";
+        String c = "{\"cluster\":\"prod\",\"host\":\"c\",\"region\":\"west\"}";
+
+        assertRows(
+            query("tx{region=\"east\"} or on(region) tx{region=\"west\"}") + " | KEEP result, _timeseries | SORT result",
+            List.of(List.of(1.0, a), List.of(3.0, b), List.of(5.0, c))
+        );
+        // a and b share region east: both stay, and the right operand adds only c.
+        assertRows(
+            query("tx{region=\"east\"} or on(region) tx") + " | KEEP result, _timeseries | SORT result",
+            List.of(List.of(1.0, a), List.of(3.0, b), List.of(5.0, c))
+        );
+        // b shares cluster and region with a, so only c is added.
+        assertRows(
+            query("tx{host=\"a\"} or ignoring(host) tx{host=~\"b|c\"}") + " | KEEP result, _timeseries | SORT result",
+            List.of(List.of(1.0, a), List.of(5.0, c))
+        );
+        assertRows(query("tx{host=\"a\"} or ignoring(host, region) tx") + " | KEEP result, _timeseries", List.of(List.of(1.0, a)));
+        // on () adds the right operand only at steps where the left one has no series.
+        assertRows(query("tx{host=\"nope\"} or on() tx{host=\"c\"}") + " | KEEP result, _timeseries", List.of(List.of(5.0, c)));
+        assertRows(query("tx{host=\"a\"} or on() tx{host=\"c\"}") + " | KEEP result, _timeseries", List.of(List.of(1.0, a)));
+        // vector(7) has no region: its signature never matches a series that has one. Its constant holds on its own rows only.
+        assertRows(query("tx{host=\"a\"} unless on(region) vector(7)") + " | KEEP result, _timeseries", List.of(List.of(1.0, a)));
+        assertRows(
+            query("vector(7) or on(region) tx{host=\"c\"}") + " | KEEP result, _timeseries | SORT result",
+            List.of(List.of(5.0, c), List.of(7.0, "{}"))
+        );
+    }
+
+    /** or on(__name__, ...) keeps a right series that differs from a left one only in its name, also inside a default or. */
+    public void testOrOnMetricNameKeepsSeriesApartByName() {
+        createMetricsIndexWithRx(INDEX);
+        index(INDEX, "cluster", "prod", "host", "a", LabelMatcher.NAME, "rx", "rx", 60.0);
+        index(INDEX, "cluster", "prod", "host", "a", LabelMatcher.NAME, "tx", "tx", 10.0);
+        refresh(INDEX);
+        List<List<Object>> expected = List.of(
+            List.of(10.0, "{\"__name__\":\"tx\",\"cluster\":\"prod\",\"host\":\"a\"}"),
+            List.of(60.0, "{\"__name__\":\"rx\",\"cluster\":\"prod\",\"host\":\"a\"}")
+        );
+        assertRows(query("tx or on(__name__, host) rx") + " | KEEP result, _timeseries | SORT result", expected);
+        // The default or keeps every left series, the two that differ only in their name included.
+        assertRows(query("(tx or on(__name__, host) rx) or tx") + " | KEEP result, _timeseries | SORT result", expected);
+    }
+
     /** Reject result names that collide with labels/metadata before the plan consistency checker. */
     public void testResultNameMustNotShadowLabelsOrMetadata() {
         createMetricsIndex(INDEX);
@@ -1119,14 +1174,18 @@ public class FunctionalTimeSeriesIT extends AbstractEsqlIntegTestCase {
             List.of(60.0, "{\"__name__\":\"rx\",\"cluster\":\"prod\",\"host\":\"a\"}"),
             List.of(80.0, "{\"__name__\":\"rx\",\"cluster\":\"prod\",\"host\":\"b\"}")
         );
-        // Empty selector x ignoring: must be empty, not the right operand.
-        assertRows(query("(rx{host=\"nope\"}) * ignoring (host) (tx)") + " | KEEP result, _timeseries", List.of());
+        // Empty selector x ignoring: must be empty, not the right operand. One tx series, as ignoring (host) makes the two
+        // a duplicate match group, which fails the query.
+        assertRows(query("(rx{host=\"nope\"}) * ignoring (host) (tx{host=\"a\"})") + " | KEEP result, _timeseries", List.of());
         // Empty rate limb on the left (single tx sample) must not strip labels from the raw right.
         assertRows(query("(rate(tx[1m])) or (rx)") + " | KEEP result, _timeseries", expected);
         // Empty matcher left of or -> raw right with full fingerprints.
         assertRows(query("(rx{host=\"nope\"}) or (rx)") + " | KEEP result, _timeseries", expected);
         // Empty arith/compare left of or -> same (promfuzz-vm 436).
-        assertRows(query("(((rx{host=\"nope\"}) * ignoring (host) (tx)) == (rx)) or (rx)") + " | KEEP result, _timeseries", expected);
+        assertRows(
+            query("(((rx{host=\"nope\"}) * ignoring (host) (tx{host=\"a\"})) == (rx)) or (rx)") + " | KEEP result, _timeseries",
+            expected
+        );
     }
 
     /** Empty right of or (disjoint label_replace/and) must keep left fingerprints. */

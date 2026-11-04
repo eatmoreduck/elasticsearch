@@ -12,6 +12,7 @@ import org.elasticsearch.xpack.esql.core.expression.FoldContext;
 import org.elasticsearch.xpack.esql.core.expression.NamedExpression;
 import org.elasticsearch.xpack.esql.expression.Order;
 import org.elasticsearch.xpack.esql.expression.predicate.nulls.IsNotNull;
+import org.elasticsearch.xpack.esql.plan.logical.Eval;
 import org.elasticsearch.xpack.esql.plan.logical.Filter;
 import org.elasticsearch.xpack.esql.plan.logical.LogicalPlan;
 import org.elasticsearch.xpack.esql.plan.logical.TopNBy;
@@ -149,6 +150,68 @@ public class PromqlPlanSetOperatorTests extends AbstractPromqlPlanOptimizerTests
         );
         assertTrue(plan.resolved());
         assertFalse(plan.collect(HashJoin.class).isEmpty());
+    }
+
+    /**
+     * {@code a or on(K) b} unions {@code a} with {@code b unless on(K) a} and deduplicates nothing: several series of
+     * {@code a} sharing a signature all stay. The second branch anti-joins the right operand against the left one.
+     */
+    public void testOrOnUnionsTheUnmatchedRightSeries() {
+        LogicalPlan plan = planPromql(
+            "PROMQL index=k8s step=1m sum by (cluster, pod) (network.bytes_in) or on (cluster) sum by (cluster) (network.cost)",
+            false
+        );
+        assertTrue(plan.resolved());
+        List<UnionAll> unions = plan.collect(UnionAll.class);
+        assertThat(unions, hasSize(1));
+        List<LogicalPlan> branches = unions.getFirst().children();
+        assertThat(branches, hasSize(2));
+        assertTrue("nothing deduplicates the union", plan.collect(TopNBy.class).stream().noneMatch(t -> t.child() instanceof UnionAll));
+        assertTrue("the left operand is kept as is", branches.getFirst().collect(HashJoin.class).isEmpty());
+        List<HashJoin> joins = branches.get(1).collect(HashJoin.class);
+        assertThat(joins, hasSize(1));
+        assertThat(joins.getFirst().config().type(), equalTo(JoinTypes.LEFT));
+    }
+
+    /** The empty-guard idiom: {@code on ()} adds the right operand at the steps where the left one has no series. */
+    public void testOrOnEmptyAntiJoinsOnStep() {
+        LogicalPlan plan = planPromql("PROMQL index=k8s step=1m sum(rate(network.total_bytes_in[5m])) or on () vector(1)", false);
+        assertTrue(plan.resolved());
+        List<HashJoin> joins = plan.collect(HashJoin.class);
+        assertThat(joins, hasSize(1));
+        assertThat(joins.getFirst().leftFields(), hasSize(1));
+    }
+
+    /**
+     * {@code unless} keeps a left series no right one matches, where the right value is null: a constant right operand
+     * ({@code vector(1)}) must not fold into the expression above the join as if every left series had a match.
+     */
+    public void testUnlessConstantRightStaysNullWhereUnmatched() {
+        LogicalPlan plan = planPromql("PROMQL index=k8s step=1m network.bytes_in unless on (cluster) vector(1)");
+        List<HashJoin> joins = plan.collect(HashJoin.class);
+        assertThat(joins, hasSize(1));
+        assertThat(joins.getFirst().config().type(), equalTo(JoinTypes.LEFT));
+        Attribute right = joins.getFirst().addedFields().getFirst();
+        assertTrue(
+            "the result still reads the right value",
+            plan.anyMatch(p -> p instanceof Eval eval && eval.references().contains(right))
+        );
+    }
+
+    /**
+     * A default {@code or} whose left limb matches {@code on(__name__, ...)} can hold two series apart only by their name:
+     * it unions by anti-join too, rather than keeping one series per default signature.
+     */
+    public void testOrOverMetricNameMatchKeepsEveryLeftSeries() {
+        assumeTrue("the default or leaves the metric name out of typed metadata", typedTimeSeriesMetadata());
+        LogicalPlan plan = planPromql(
+            "PROMQL index=k8s step=1m (network.bytes_in or on (__name__, pod) network.cost) or network.bytes_in",
+            false
+        );
+        assertTrue(plan.resolved());
+        // The inner or unions twice: as the outer left operand, and as what the outer right operand is anti-joined against.
+        assertThat(plan.collect(UnionAll.class), hasSize(3));
+        assertTrue(plan.collect(TopNBy.class).stream().noneMatch(t -> t.child() instanceof UnionAll));
     }
 
     /**

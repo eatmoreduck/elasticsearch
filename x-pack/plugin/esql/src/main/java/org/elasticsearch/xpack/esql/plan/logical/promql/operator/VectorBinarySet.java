@@ -143,11 +143,42 @@ public final class VectorBinarySet extends VectorBinaryOperator {
             return super.translate(context);
         }
         List<LogicalPlan> branches = flattenUnion(this);
+        // One limb: this or keeps every left series of a signature, so it unions a with b unless a, deduplicating nothing.
+        boolean keepsLeftTies = branches.size() == 1;
+        if (keepsLeftTies) {
+            branches = List.of(left(), rightUnlessLeft());
+        }
         List<IntermediateResult> intermediateResults = new ArrayList<>(branches.size());
         for (LogicalPlan branch : branches) {
             intermediateResults.add(context.translateIntermediate(branch, new NameId(), new NameId()));
         }
+        if (keepsLeftTies) {
+            return wrapUnion(context, unionBranches(context, branches, intermediateResults, output()));
+        }
         return wrapUnion(context, translateUnion(context, branches, intermediateResults, output()));
+    }
+
+    /**
+     * The right operand without the series the left one matches: {@code b unless<M> a} for {@code a or<M> b}. Prometheus
+     * keeps every series of {@code a} and those of {@code b} whose match signature no series of {@code a} has, so the union of
+     * {@code a} and this needs no deduplication.
+     */
+    private VectorBinarySet rightUnlessLeft() {
+        return new VectorBinarySet(source(), right(), left(), match(), SetOp.SUBTRACT);
+    }
+
+    /**
+     * Whether {@code limb} can hold several series of one default signature at a step, which a top-1 per signature would
+     * cut to one: an or matching {@code on(__name__, ...)} keeps series that differ only in their name. Any other or keeps
+     * one series per default signature, as two series agreeing on every label but the name agree on its match signature.
+     */
+    private static boolean mayRepeatSignature(LogicalPlan limb) {
+        return limb.anyMatch(
+            node -> node instanceof VectorBinarySet setOp
+                && setOp.op() == SetOp.UNION
+                && setOp.match().filter() == VectorMatch.Filter.ON
+                && setOp.match().filterLabels().contains(LabelMatcher.NAME)
+        );
     }
 
     /**
@@ -180,13 +211,22 @@ public final class VectorBinarySet extends VectorBinaryOperator {
         LogicalPlan plan = new Project(source(), union, withoutBranch);
         String pinName = TemporaryNameGenerator.locallyUniqueTemporaryName(cmd.valueColumnName());
         Alias pinned = new Alias(value.source(), pinName, value, new NameId());
-        plan = new Eval(source(), plan, List.of(pinned));
+        // Expose the step under the enclosing frame's step identity, as a join result does, so an operand sharing the
+        // frame (a scalar in 2 + (a or b)) reads the union's step.
+        Alias frameStep = new Alias(step.source(), step.name(), step, context.stepAttr().id());
+        plan = new Eval(source(), plan, List.of(pinned, frameStep));
         List<NamedExpression> pinnedOut = new ArrayList<>();
         pinnedOut.add(pinned.toAttribute());
-        pinnedOut.add(step);
+        pinnedOut.add(TranslationContext.pinnedAttribute(frameStep));
         pinnedOut.addAll(labels);
         plan = new Project(source(), plan, pinnedOut);
-        return new IntermediateResult(plan, pinned.toAttribute(), step, null, Kind.AFTER_INITIAL_AGGREGATE);
+        return new IntermediateResult(
+            plan,
+            pinned.toAttribute(),
+            TranslationContext.pinnedAttribute(frameStep),
+            null,
+            Kind.AFTER_INITIAL_AGGREGATE
+        );
     }
 
     /** Combines independent union branches and keeps the leftmost value for each series and step. */
@@ -206,78 +246,13 @@ public final class VectorBinarySet extends VectorBinaryOperator {
         List<Attribute> tsIdentity
     ) {
         PromqlCommand cmd = context.cmd();
-        // Already validated against max_branch_count_per_merge by PromqlCommand.verify.
-        int maxBranches = context.analyzer().maxBranchCountPerMerge();
-        assert intermediateResults.size() <= maxBranches
-            : "invariant: merge branch count ["
-                + intermediateResults.size()
-                + "] must be <= the max_branch_count_per_merge limit ["
-                + maxBranches
-                + "]";
-
         var source = cmd.source();
-        var branchPlans = new ArrayList<LogicalPlan>(intermediateResults.size());
-        for (int i = 0; i < intermediateResults.size(); i++) {
-            // Absent left must not shadow a present right (rate or irate fallback).
-            var ir = intermediateResults.get(i);
-            LogicalPlan branchPlan = PromqlCommand.emitNullsFilter(source, ir.plan(), ir.valueColumn());
-            var branchTagExpression = new Alias(source, cmd.branchColumnName(), new Literal(source, i, DataType.INTEGER));
-            var nullLabelEvals = new ArrayList<Alias>();
-            // Pin layout across the exchange (#158164): Eval name-shadow leaves ghost channels otherwise.
-            var projections = new ArrayList<NamedExpression>(List.of(ir.valueColumn(), ir.step()));
-            if (ir.kind().constant == false) {
-                // Typed: separate match key unsets __name__ (Prometheus set-op identity). Keyword cannot unset
-                // __name__ after collapse, so it dedups on metadata instead.
-                UnresolvedPromqlAttribute branchTimeSeriesMetadata = PromqlLabels.metadataLabel(branches.get(i).output());
-                boolean typedMetadata = PromqlCommand.usesTimeSeriesMetadata(context.analyzer());
-                for (Attribute label : tsIdentity) {
-                    if (PromqlLabels.isMetadataLabel(label)) {
-                        UnresolvedPromqlAttribute pack = branchTimeSeriesMetadata != null
-                            ? UnresolvedPromqlAttribute.metadata(source, branchTimeSeriesMetadata.unset())
-                            : UnresolvedPromqlAttribute.of(source, label);
-                        projections.add(new Alias(source, MetadataAttribute.TIMESERIES, pack, label.id()));
-                        if (typedMetadata) {
-                            Set<String> matchUnset = new LinkedHashSet<>();
-                            if (branchTimeSeriesMetadata != null) {
-                                matchUnset.addAll(branchTimeSeriesMetadata.unset());
-                            }
-                            matchUnset.add(LabelMatcher.NAME);
-                            projections.add(new Alias(source, OR_MATCH_KEY, UnresolvedPromqlAttribute.metadata(source, matchUnset)));
-                        }
-                    } else {
-                        // Null-fill undeclared labels: resolving them would invent by-keys (empty max by (cluster) or vector(0)).
-                        String labelName = PromqlLabels.labelName(label);
-                        boolean declared = PromqlLabels.getLabel(
-                            branches.get(i).output().stream().filter(a -> PromqlLabels.isMetadataLabel(a) == false).toList(),
-                            labelName
-                        ) != null;
-                        if (declared) {
-                            projections.add(UnresolvedPromqlAttribute.of(source, label));
-                        } else {
-                            Alias nullLabel = new Alias(source, label.name(), new Literal(source, null, label.dataType()), new NameId());
-                            nullLabelEvals.add(nullLabel);
-                            projections.add(nullLabel.toAttribute());
-                        }
-                    }
-                }
-            }
-            projections.add(branchTagExpression.toAttribute());
-            var evals = new ArrayList<Alias>();
-            evals.add(branchTagExpression);
-            evals.addAll(nullLabelEvals);
-            LogicalPlan tagged = new Eval(source, branchPlan, evals);
-            branchPlans.add(new Project(source, tagged, projections));
-        }
-
-        // UnionAll recomputes output by name; ids from the first branch stay valid for TopNBy groupings.
-        List<Attribute> unionOutput = VectorBinarySet.unionOutputByName(branchPlans);
-        var union = new UnionAll(source, branchPlans, unionOutput);
-
+        UnionAll union = unionBranches(context, branches, intermediateResults, tsIdentity);
         var groupings = new ArrayList<Expression>();
         Attribute branchAttr = null;
         Attribute orMatchKey = null;
         Attribute timeSeriesMetadataAttr = null;
-        for (Attribute attr : unionOutput) {
+        for (Attribute attr : union.output()) {
             if (attr.name().equals(cmd.branchColumnName())) {
                 branchAttr = attr;
             } else if (attr.name().equals(cmd.stepColumnName())) {
@@ -306,10 +281,106 @@ public final class VectorBinarySet extends VectorBinaryOperator {
         return new TopNBy(source, union, List.of(order), new Literal(source, 1, DataType.INTEGER), groupings);
     }
 
-    /** Left-to-right limbs of a default-matching or chain. */
+    /** The branches side by side, each tagged with its position and projected onto the union's labels. */
+    private static UnionAll unionBranches(
+        TranslationContext context,
+        List<LogicalPlan> branches,
+        List<IntermediateResult> intermediateResults,
+        List<Attribute> tsIdentity
+    ) {
+        PromqlCommand cmd = context.cmd();
+        // Already validated against max_branch_count_per_merge by PromqlCommand.verify.
+        int maxBranches = context.analyzer().maxBranchCountPerMerge();
+        assert intermediateResults.size() <= maxBranches
+            : "invariant: merge branch count ["
+                + intermediateResults.size()
+                + "] must be <= the max_branch_count_per_merge limit ["
+                + maxBranches
+                + "]";
+
+        var source = cmd.source();
+        var branchPlans = new ArrayList<LogicalPlan>(intermediateResults.size());
+        for (int i = 0; i < intermediateResults.size(); i++) {
+            // Absent left must not shadow a present right (rate or irate fallback).
+            var ir = intermediateResults.get(i);
+            LogicalPlan branchPlan = PromqlCommand.emitNullsFilter(source, ir.plan(), ir.valueColumn());
+            var branchTagExpression = new Alias(source, cmd.branchColumnName(), new Literal(source, i, DataType.INTEGER));
+            var nullLabelEvals = new ArrayList<Alias>();
+            // Pin layout across the exchange (#158164): Eval name-shadow leaves ghost channels otherwise.
+            var projections = new ArrayList<NamedExpression>(List.of(ir.valueColumn(), ir.step()));
+            // Every branch, a constant one too, lays out the union's columns: UnionAll lines them up by name.
+            // Typed: separate match key unsets __name__ (Prometheus set-op identity). Keyword cannot unset
+            // __name__ after collapse, so it dedups on metadata instead.
+            UnresolvedPromqlAttribute branchTimeSeriesMetadata = PromqlLabels.metadataLabel(branches.get(i).output());
+            boolean typedMetadata = PromqlCommand.usesTimeSeriesMetadata(context.analyzer());
+            // The labels the union holds in columns compare there, so the match key leaves them out of the metadata.
+            List<String> columnLabels = PromqlLabels.labelNames(
+                tsIdentity.stream().filter(label -> PromqlLabels.isMetadataLabel(label) == false).toList()
+            );
+            for (Attribute label : tsIdentity) {
+                if (PromqlLabels.isMetadataLabel(label)) {
+                    if (branchTimeSeriesMetadata != null) {
+                        var pack = UnresolvedPromqlAttribute.metadata(source, branchTimeSeriesMetadata.unset());
+                        projections.add(new Alias(source, MetadataAttribute.TIMESERIES, pack, label.id()));
+                        if (typedMetadata) {
+                            Set<String> matchUnset = new LinkedHashSet<>(branchTimeSeriesMetadata.unset());
+                            matchUnset.add(LabelMatcher.NAME);
+                            matchUnset.addAll(columnLabels);
+                            projections.add(new Alias(source, OR_MATCH_KEY, UnresolvedPromqlAttribute.metadata(source, matchUnset)));
+                        }
+                    } else {
+                        // A branch without metadata holds all its labels in columns: its metadata is the empty label set.
+                        var empty = UnresolvedPromqlAttribute.label(source, VectorBinaryOperator.EMPTY_SIGNATURE_KEY);
+                        projections.add(new Alias(source, MetadataAttribute.TIMESERIES, empty, label.id()));
+                        if (typedMetadata) {
+                            projections.add(new Alias(source, OR_MATCH_KEY, empty));
+                        }
+                    }
+                } else {
+                    // Null-fill a label the branch lacks: resolving it would invent by-keys (empty max by (cluster) or
+                    // vector(0)). Typed metadata that keeps the label holds it, as the match key leaves it out there.
+                    String labelName = PromqlLabels.labelName(label);
+                    boolean declared = PromqlLabels.getLabel(
+                        branches.get(i).output().stream().filter(a -> PromqlLabels.isMetadataLabel(a) == false).toList(),
+                        labelName
+                    ) != null;
+                    boolean inMetadata = typedMetadata
+                        && branchTimeSeriesMetadata != null
+                        && branchTimeSeriesMetadata.unset().contains(labelName) == false;
+                    if (declared || inMetadata) {
+                        // Under the union's column name: a branch may name the label after its source field (labels.pod)
+                        // or bare (pod), and UnionAll lines branches up by name.
+                        projections.add(new Alias(source, label.name(), UnresolvedPromqlAttribute.of(source, label)));
+                    } else {
+                        Alias nullLabel = new Alias(source, label.name(), new Literal(source, null, label.dataType()), new NameId());
+                        nullLabelEvals.add(nullLabel);
+                        projections.add(nullLabel.toAttribute());
+                    }
+                }
+            }
+            projections.add(branchTagExpression.toAttribute());
+            var evals = new ArrayList<Alias>();
+            evals.add(branchTagExpression);
+            evals.addAll(nullLabelEvals);
+            LogicalPlan tagged = new Eval(source, branchPlan, evals);
+            branchPlans.add(new Project(source, tagged, projections));
+        }
+
+        // UnionAll recomputes output by name; ids from the first branch stay valid for TopNBy groupings.
+        return new UnionAll(source, branchPlans, VectorBinarySet.unionOutputByName(branchPlans));
+    }
+
+    /**
+     * Left-to-right limbs of a default-matching or chain, which translation unions keeping one series per step and
+     * signature. An on/ignoring or is one limb. A chain is one limb too when a limb before its last can hold several
+     * series of one signature: the default union would keep only one of them.
+     */
     public static List<LogicalPlan> flattenUnion(LogicalPlan node) {
         var branches = new ArrayList<LogicalPlan>();
         flattenUnion(node, branches);
+        if (branches.subList(0, branches.size() - 1).stream().anyMatch(VectorBinarySet::mayRepeatSignature)) {
+            return List.of(node);
+        }
         return branches;
     }
 

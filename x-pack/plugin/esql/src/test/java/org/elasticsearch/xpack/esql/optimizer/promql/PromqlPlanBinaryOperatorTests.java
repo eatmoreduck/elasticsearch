@@ -19,6 +19,7 @@ import org.elasticsearch.xpack.esql.core.expression.FieldAttribute;
 import org.elasticsearch.xpack.esql.core.expression.FoldContext;
 import org.elasticsearch.xpack.esql.core.expression.Literal;
 import org.elasticsearch.xpack.esql.core.expression.MetadataAttribute;
+import org.elasticsearch.xpack.esql.core.expression.NamedExpression;
 import org.elasticsearch.xpack.esql.core.expression.ReferenceAttribute;
 import org.elasticsearch.xpack.esql.core.expression.TimeSeriesMetadataAttribute;
 import org.elasticsearch.xpack.esql.core.type.DataType;
@@ -511,6 +512,31 @@ public class PromqlPlanBinaryOperatorTests extends AbstractPromqlPlanOptimizerTe
         assertThat(join.leftFields().getFirst().name(), equalTo("step"));
         assertThat(keyedLabels(join.left()), containsInAnyOrder("cluster"));
         assertThat(keyedLabels(join.right()), containsInAnyOrder("cluster"));
+    }
+
+    /**
+     * The "one" side of a vector match keeps one row per series, however few labels the match key reads: two series
+     * sharing the key reach the join as two rows, so its duplicate guards fail the query as Prometheus does, instead of
+     * the collapse merging them into one multivalued value that the operator then nulls out. One-to-one matching has a
+     * "one" side on both ends. (A "many" side, or an {@code ignoring} key, packs the series' own metadata.)
+     */
+    public void testVectorMatchOneSideKeepsItsSeries() {
+        assumeTrue("PromQL vector matching is required", EsqlCapabilities.Cap.PROMQL_VECTOR_MATCHING_V0.isEnabled());
+        assertKeepsSeries(vectorMatch("on (cluster)").left());
+        assertKeepsSeries(vectorMatch("on (cluster)").right());
+        assertKeepsSeries(vectorMatch("on (cluster) group_left").right());
+        assertKeepsSeries(vectorMatch("on (cluster) group_right").right());
+    }
+
+    private HashJoin vectorMatch(String match) {
+        var plan = planPromql("PROMQL index=k8s step=5m result=(network.eth0.tx * " + match + " network.eth0.rx)");
+        return plan.collect(HashJoin.class).getFirst();
+    }
+
+    private static void assertKeepsSeries(LogicalPlan joinSide) {
+        for (Aggregate aggregate : joinSide.collect(Aggregate.class)) {
+            assertThat(aggregate.groupings().stream().map(g -> ((NamedExpression) g).name()).toList(), hasItem("_tsid"));
+        }
     }
 
     public void testNestedVectorMatchUsesCurrentOperandLabels() {
@@ -1262,6 +1288,14 @@ public class PromqlPlanBinaryOperatorTests extends AbstractPromqlPlanOptimizerTe
             var plan = planPrometheusLayout(promql);
             assertTrue(promql, plan.resolved());
         }
+    }
+
+    /** Grafana empty-denominator idiom on a {@code __name__}-dimension index: nested {@code or on ()} under a division. */
+    public void testOrOnEmptyUnderDivisionPrometheusLayout() {
+        var plan = planPrometheusLayout("sum(node_memory_MemAvailable_bytes) / (sum(node_memory_MemAvailable_bytes) or on () vector(1))");
+        assertTrue(plan.resolved());
+        assertFalse(plan.collect(UnionAll.class).isEmpty());
+        assertFalse(plan.collect(HashJoin.class).isEmpty());
     }
 
     /**

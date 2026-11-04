@@ -302,21 +302,20 @@ public class PromqlVerifierTests extends ESTestCase {
         assertTrue(tsdb.query("PROMQL index=test step=5m sum(rate(network.bytes_in[5m])) or vector(0)").resolved());
     }
 
-    public void testUnionWithMatchingIsRejected() {
-        // TODO: or with on/ignoring, the empty-guard on () idiom included, keeps every series of an operand that shares a
-        // match signature: a top-1 per signature that keeps its ties (https://github.com/elastic/elasticsearch/pull/164632).
+    public void testUnionWithMatchingIsSupported() {
+        // a or on(K) b keeps every series of a and the series of b no series of a matches on K, on () included.
         for (String query : List.of(
             "sum(network.bytes_in) or on () vector(1)",
             "sum(network.bytes_in) / (sum(network.bytes_in) or on () vector(1))",
-            "sum by (host) (network.bytes_in) or on (host) sum by (host) (network.connections)",
-            "network.bytes_in or ignoring (host) network.connections",
+            "sum by (host) (network.bytes_in) or on () vector(1)",
+            "sum by (host, metricset) (network.bytes_in) or on (host) sum by (host) (network.connections)",
+            "network.bytes_in or on (host) network.connections",
             "network.bytes_in or on (__name__, host) network.connections"
         )) {
-            tsdb.error(
-                "PROMQL index=test step=5m " + query,
-                containsString("set operator [or] with on/ignoring is not supported at this time")
-            );
+            assertTrue(query, tsdb.query("PROMQL index=test step=5m " + query).resolved());
+            assertTrue(query, keywordTsdb.query("PROMQL index=test step=5m " + query).resolved());
         }
+        assertNeedsTypedMetadata("network.bytes_in or ignoring (host) network.connections");
     }
 
     /**

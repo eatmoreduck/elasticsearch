@@ -14,6 +14,7 @@ import org.elasticsearch.xpack.esql.common.Failure;
 import org.elasticsearch.xpack.esql.core.expression.Alias;
 import org.elasticsearch.xpack.esql.core.expression.Attribute;
 import org.elasticsearch.xpack.esql.core.expression.Expression;
+import org.elasticsearch.xpack.esql.core.expression.Expressions;
 import org.elasticsearch.xpack.esql.core.expression.Literal;
 import org.elasticsearch.xpack.esql.core.expression.MetadataAttribute;
 import org.elasticsearch.xpack.esql.core.expression.NameId;
@@ -140,7 +141,8 @@ public final class PruneUnresolvedPromqlAttributeRefs extends ParameterizedRule<
 
         /** Rebuilds {@code node}, binding its own references, so that it carries every column of {@code needs} it can. */
         private LogicalPlan resolve(LogicalPlan node, List<UnresolvedPromqlAttribute> needs) {
-            if (isRaw(node)) {
+            // A constant operand (vector(1)) reads its match key raw: what it lacks binds to null like anywhere else.
+            if (isRaw(node) && node.anyMatch(raw -> references(raw).isEmpty() == false) == false) {
                 return node;
             }
             if (node instanceof Project project && project.child() instanceof UnpackDims unpack) {
@@ -350,7 +352,9 @@ public final class PruneUnresolvedPromqlAttributeRefs extends ParameterizedRule<
             var groupings = new ArrayList<Expression>();
             groupings.add(node.groupings().getFirst());
             groupings.addAll(groupKeys);
-            boolean bySeries = grain.perSeries() && keys.metadata().stream().anyMatch(metadata -> metadata.unset().isEmpty());
+            // A value that aggregates nothing across series keeps one row per series, whatever labels its readers need.
+            boolean bySeries = grain.perSeries();
+            Alias seriesKey = null;
             if (bySeries) {
                 Attribute tsid = seriesId(child);
                 if (tsid == null) {
@@ -361,11 +365,17 @@ public final class PruneUnresolvedPromqlAttributeRefs extends ParameterizedRule<
                     );
                     tsid = added;
                 }
-                groupings.add(new Alias(source, TemporaryNameGenerator.locallyUniqueTemporaryName(MetadataAttribute.TSID_FIELD), tsid));
+                seriesKey = new Alias(source, TemporaryNameGenerator.locallyUniqueTemporaryName(MetadataAttribute.TSID_FIELD), tsid);
+                groupings.add(seriesKey);
             }
             List<NamedExpression> aggregates = placeKeys(node.aggregates(), groupKeys.stream().map(NamedExpression::toAttribute).toList());
-            if (keys.declared()) {
+            if (keys.declared() || bySeries) {
                 aggregates = wrapValues(aggregates);
+            }
+            List<Attribute> output = Expressions.asAttributes(aggregates);
+            if (seriesKey != null) {
+                // Aggregates end with every grouping, as the verifier and the time-series translation read them.
+                aggregates = CollectionUtils.combine(aggregates, seriesKey.toAttribute());
             }
             var collapse = new TimeSeriesAggregate(
                 source,
@@ -376,7 +386,7 @@ public final class PruneUnresolvedPromqlAttributeRefs extends ParameterizedRule<
                 node.timestamp(),
                 node.origin()
             );
-            return bySeries ? new Project(source, collapse, collapse.output()) : collapse;
+            return bySeries ? new Project(source, collapse, output) : collapse;
         }
 
         /** The {@code _tsid} the source relation of {@code plan} already reads, or null: a relation reads it at most once. */

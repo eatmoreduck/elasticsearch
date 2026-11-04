@@ -1115,18 +1115,6 @@ public class PromqlCommand extends UnaryPlan implements TelemetryAware, Timestam
             failures.add(fail(setOp, "set operator \"{}\" not allowed in binary scalar expression", setOp.op().keyword()));
             return;
         }
-        if (setOp.op() == VectorBinarySet.SetOp.INTERSECT) {
-            return;
-        }
-        if (setOp.op() == VectorBinarySet.SetOp.SUBTRACT) {
-            return;
-        }
-        if (setOp.match() != VectorMatch.NONE) {
-            // TODO: Support or with on/ignoring by unioning on each operator's match signature once TopNBy keeps ties.
-            // https://github.com/elastic/elasticsearch/issues/158181
-            // https://github.com/elastic/elasticsearch/pull/164632
-            failures.add(fail(setOp, "set operator [or] with on/ignoring is not supported at this time [{}]", setOp.sourceText()));
-        }
     }
 
     private static boolean hasSourceBackedExpression(LogicalPlan plan) {
