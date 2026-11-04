@@ -188,6 +188,47 @@ public class PromqlPlanSetOperatorTests extends AbstractPromqlPlanOptimizerTests
     }
 
     /**
+     * {@code a or on(K) b} unions {@code a} with {@code b unless on(K) a}: one UnionAll whose second branch anti-joins the
+     * right operand against the left one.
+     */
+    public void testOrOnUnionsTheUnmatchedRightSeries() {
+        LogicalPlan plan = planPromql(
+            "PROMQL index=k8s step=1m sum by (cluster, pod) (network.bytes_in) or on (cluster) sum by (cluster) (network.cost)",
+            false
+        );
+        assertTrue(plan.resolved());
+        List<LogicalPlan> branches = assertUnionOf(plan, 2);
+        assertTrue("the left operand is kept as is", branches.getFirst().collect(HashJoin.class).isEmpty());
+        List<HashJoin> joins = branches.get(1).collect(HashJoin.class);
+        assertThat(joins, hasSize(1));
+        assertThat(joins.getFirst().config().type(), equalTo(JoinTypes.LEFT));
+    }
+
+    /** An on/ignoring union inside a default chain adds one branch to the chain's UnionAll. */
+    public void testOrIgnoringInChainAddsOneBranch() {
+        LogicalPlan plan = planPromql(
+            "PROMQL index=k8s step=1m sum by (cluster, pod) (network.bytes_in) or ignoring (pod) sum by (cluster, pod) (network.cost) "
+                + "or sum by (cluster, pod) (network.total_bytes_in)",
+            false
+        );
+        assertTrue(plan.resolved());
+        assertUnionOf(plan, 3);
+    }
+
+    /**
+     * The branches of the plan's one UnionAll, deduplicated by a TopNBy right above it. Unlike {@link #assertUnionDedupShape}
+     * this admits other TopNBy nodes, such as the one a set operator's join reduces its build side with.
+     */
+    private static List<LogicalPlan> assertUnionOf(LogicalPlan plan, int expectedBranches) {
+        List<UnionAll> unions = plan.collect(UnionAll.class);
+        assertThat("expected a single UnionAll", unions, hasSize(1));
+        UnionAll union = unions.getFirst();
+        assertThat(union.children(), hasSize(expectedBranches));
+        assertTrue("the union is deduplicated", plan.anyMatch(p -> p instanceof TopNBy topN && topN.child() == union));
+        return union.children();
+    }
+
+    /**
      * Empty-guard {@code sum(...) or on () vector(1)}: both sides are labelless, so left-preferring TopNBy BY step
      * alone matches Prometheus (keep left when present, else the fill).
      */

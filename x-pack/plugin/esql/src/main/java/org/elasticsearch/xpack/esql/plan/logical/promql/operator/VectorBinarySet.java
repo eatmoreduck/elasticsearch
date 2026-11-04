@@ -308,21 +308,37 @@ public final class VectorBinarySet extends VectorBinaryOperator {
         return new TopNBy(source, union, List.of(order), new Literal(source, 1, DataType.INTEGER), groupings);
     }
 
-    /** Left-to-right limbs of a default-matching or chain. */
+    /**
+     * Left-to-right limbs of an or chain, as translation unions them. An on/ignoring union contributes its left operand's
+     * limbs and its right operand {@link #rightUnlessLeft unless the left}.
+     */
     public static List<LogicalPlan> flattenUnion(LogicalPlan node) {
         var branches = new ArrayList<LogicalPlan>();
         flattenUnion(node, branches);
         return branches;
     }
 
-    /** Keep on/ignoring unions intact so their match semantics are not lost. */
     private static void flattenUnion(LogicalPlan node, List<LogicalPlan> branches) {
-        if (node instanceof VectorBinarySet setOp && setOp.op() == SetOp.UNION && setOp.match().equals(VectorMatch.NONE)) {
+        if (node instanceof VectorBinarySet setOp && setOp.op() == SetOp.UNION && isLabellessOrOnEmpty(setOp) == false) {
             flattenUnion(setOp.left(), branches);
-            flattenUnion(setOp.right(), branches);
+            if (setOp.match().equals(VectorMatch.NONE)) {
+                flattenUnion(setOp.right(), branches);
+            } else {
+                branches.add(setOp.rightUnlessLeft());
+            }
         } else {
             branches.add(node);
         }
+    }
+
+    /**
+     * The right operand of {@code a or on(K) b} without the series the left one matches: {@code b unless on(K) a}.
+     * Prometheus keeps every series of {@code a} and those of {@code b} no series of {@code a} matches on {@code K}, so
+     * the on/ignoring union is the default union of {@code a} and this. The default union cannot drop anything more:
+     * two series with the same labels also agree on {@code K}, so such a series of {@code b} is already gone.
+     */
+    private VectorBinarySet rightUnlessLeft() {
+        return new VectorBinarySet(source(), right(), left(), match(), SetOp.SUBTRACT);
     }
 
 }

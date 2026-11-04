@@ -303,14 +303,20 @@ public class PromqlVerifierTests extends ESTestCase {
         // Empty-guard idiom: labelless left and right with `or on ()`.
         assertTrue(tsdb.query("PROMQL index=test step=5m sum(network.bytes_in) or on () vector(1)").resolved());
         assertTrue(tsdb.query("PROMQL index=test step=5m sum(network.bytes_in) / (sum(network.bytes_in) or on () vector(1))").resolved());
-        // Labeled left or non-empty on(...) still rejected.
+        // Any other on/ignoring union keeps the right series the left one does not match.
+        for (String query : List.of(
+            "sum by (host) (network.bytes_in) or on () vector(1)",
+            "sum(network.bytes_in) or on (host) vector(1)",
+            "sum by (host, metricset) (network.bytes_in) or on (host) sum by (host) (network.connections)",
+            "network.bytes_in or on (host) network.connections"
+        )) {
+            assertTrue(query, tsdb.query("PROMQL index=test step=5m " + query).resolved());
+            assertTrue(query, keywordTsdb.query("PROMQL index=test step=5m " + query).resolved());
+        }
+        assertNeedsTypedMetadata("network.bytes_in or ignoring (host) network.connections");
         tsdb.error(
-            "PROMQL index=test step=5m sum by (host) (network.bytes_in) or on () vector(1)",
-            containsString("set operator [or] with on/ignoring is not supported at this time")
-        );
-        tsdb.error(
-            "PROMQL index=test step=5m sum(network.bytes_in) or on (host) vector(1)",
-            containsString("set operator [or] with on/ignoring is not supported at this time")
+            "PROMQL index=test step=5m network.bytes_in or on (__name__, host) network.connections",
+            containsString("set operator [or] with on(__name__) is not supported at this time")
         );
     }
 

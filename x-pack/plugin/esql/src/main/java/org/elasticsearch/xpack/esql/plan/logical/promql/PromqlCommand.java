@@ -51,6 +51,7 @@ import org.elasticsearch.xpack.esql.plan.logical.promql.operator.VectorBinaryCom
 import org.elasticsearch.xpack.esql.plan.logical.promql.operator.VectorBinaryOperator;
 import org.elasticsearch.xpack.esql.plan.logical.promql.operator.VectorBinarySet;
 import org.elasticsearch.xpack.esql.plan.logical.promql.operator.VectorMatch;
+import org.elasticsearch.xpack.esql.plan.logical.promql.selector.LabelMatcher;
 import org.elasticsearch.xpack.esql.plan.logical.promql.selector.LiteralSelector;
 import org.elasticsearch.xpack.esql.plan.logical.promql.selector.RangeSelector;
 import org.elasticsearch.xpack.esql.plan.logical.promql.selector.Selector;
@@ -1121,10 +1122,10 @@ public class PromqlCommand extends UnaryPlan implements TelemetryAware, Timestam
         if (setOp.op() == VectorBinarySet.SetOp.SUBTRACT) {
             return;
         }
-        if (setOp.match() != VectorMatch.NONE && VectorBinarySet.isLabellessOrOnEmpty(setOp) == false) {
-            // TODO: Support or with on/ignoring beyond the empty-guard idiom.
-            // https://github.com/elastic/elasticsearch/issues/158181
-            failures.add(fail(setOp, "set operator [or] with on/ignoring is not supported at this time [{}]", setOp.sourceText()));
+        if (setOp.match().filter() == VectorMatch.Filter.ON && setOp.match().filterLabels().contains(LabelMatcher.NAME)) {
+            // An on/ignoring union keeps the right series its left one does not match, then unions the two by default
+            // matching, which ignores the metric name: a series that differs from a left one only in its name would go.
+            failures.add(fail(setOp, "set operator [or] with on(__name__) is not supported at this time [{}]", setOp.sourceText()));
         }
     }
 
