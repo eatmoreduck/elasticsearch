@@ -1097,19 +1097,21 @@ public class PromqlCommand extends UnaryPlan implements TelemetryAware, Timestam
     }
 
     /**
-     * Set operators ({@code and}/{@code or}/{@code unless}) are only partially supported.
+     * Set operators ({@code and}/{@code or}/{@code unless}) are supported with one exception, {@code or on(__name__)}.
      * <ul>
      *   <li>Scalar operands are illegal for set operators in PromQL itself; we mirror Prometheus' wording.</li>
-     *   <li>{@code and} (INTERSECT) is supported: it keeps left series that match on the right (default or
-     *       {@code on}/{@code ignoring}).</li>
-     *   <li>{@code unless} (SUBTRACT) is supported for default matching between operands with the same label set, and with
-     *       {@code on}/{@code ignoring}, which joins the right operand's match keys: it keeps left series with no match on
-     *       the right. Default matching between label sets that never match still folds to the empty vector
-     *       ({@code #158179}).</li>
-     *   <li>{@code or} is supported as a top-level or nested chain without {@code on}/{@code ignoring}
-     *       ({@code #158182}), and as the empty-guard idiom {@code <labelless> or on () <labelless>}
-     *       (typically {@code sum(...) or on () vector(1)}).</li>
+     *   <li>{@code and} (INTERSECT) keeps left series that match on the right (default or {@code on}/{@code ignoring}).</li>
+     *   <li>{@code unless} (SUBTRACT) keeps left series with no match on the right, by default matching or by
+     *       {@code on}/{@code ignoring}. Operands whose label sets never match anti-join too, so the left operand comes
+     *       back whole, as in Prometheus.</li>
+     *   <li>{@code or} (UNION) without {@code on}/{@code ignoring}, or as the empty-guard idiom
+     *       {@code <labelless> or on () <labelless>}, unions its branches by default matching. Any other
+     *       {@code a or on(K) b} plans as {@code a or (b unless on(K) a)}. That union matches by default, which ignores the
+     *       metric name, so it would drop a right series that differs from a left one only in its name: {@code on(__name__)}
+     *       is rejected.</li>
      * </ul>
+     * Matching that leaves labels out of an opaque operand's metadata ({@code ignoring}, or default matching against a
+     * narrower label set) needs typed {@code _timeseries}; keyword metadata rejects it when the label refs are pruned.
      */
     private static void verifySetOperator(Failures failures, VectorBinarySet setOp) {
         if (PromqlPlan.returnsScalar(setOp.left()) || PromqlPlan.returnsScalar(setOp.right())) {
